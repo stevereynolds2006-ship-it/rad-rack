@@ -1,0 +1,15 @@
+{
+  "name": "rad-rack",
+  "private": true,
+  "type": "module",
+  "description": "Rad Rack, an 80s mall game for the Rare Friends vibeathon.",
+  "scripts": {
+    "check": "friendsdk check games/rad-rack",
+    "dev": "friendsdk dev games/rad-rack --host 0.0.0.0 --port 4173",
+    "build": "friendsdk build games/rad-rack"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

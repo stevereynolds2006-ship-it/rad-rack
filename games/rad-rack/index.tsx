@@ -1,0 +1,1243 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import type { GameComponentProps } from "@rarefriends/friendsdk/runtime";
+import { formatGameAmount } from "@rarefriends/friendsdk/ui";
+import { maximumPrize, type GamePlay, type GameSnapshot } from "@rarefriends/friendsdk/game";
+import { createFriendReader, spriteFrame, type GenerationSprites, type SpriteFacing } from "@rarefriends/friendsdk/sprites";
+import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
+import { LOOKS, chanceLabel } from "./looks";
+import { DANCE_MOVES, clubPoint, paintClub } from "./club";
+import { TAPES, createClubMusic, type ClubMusic } from "./music";
+import { outfitZoom, paintStage, wardrobeHit, WARDROBE_CURTAIN } from "./paint";
+import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
+import { sampleFriendSprites } from "./samples";
+import "./style.css";
+
+declare global {
+  interface Window {
+    __controlsTest?: {
+      getX: () => number;
+      getYaw: () => number;
+      getSpeed: () => number;
+      setKeys: (codes: string[]) => void;
+    };
+  }
+}
+
+const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
+
+type Panel = "odds" | "reveal" | "desk" | null;
+
+type Room = "rack" | "club" | "rink" | "under" | "photo";
+type SavedPhoto = { id: number; mask: number; worn: number[] };
+
+type Live = {
+  paused: boolean;
+  reduced: boolean;
+  worn: typeof LOOKS;
+  sprites: GenerationSprites | null;
+  held: Set<string>;
+  lane: number;
+  place: { nx: number; ny: number };
+  aim: { nx: number; ny: number } | null;
+  aimLane: number | null;
+  floor: { nx: number; ny: number };
+  floorAim: { nx: number; ny: number } | null;
+  fitUntil: number;
+  outfitUntil: number;
+  maskUntil: number;
+  shotMask: number;
+  shotReady: number;
+  closet: number;
+  speed: number;
+  side: "left" | "right";
+  room: Room;
+  move: number;
+  muted: boolean;
+  skate: number;
+  quad: number;
+  mask: number;
+  lapMark: number;
+  lapShown: number;
+  crack: number;
+  lights: readonly boolean[];
+  hold: number;
+  latched: boolean;
+  cross: (way: "in" | "out" | "rink" | "photo", fromButton?: boolean) => void;
+  cycleMove: () => void;
+};
+
+/** 80s fitting room. Original Friend bitmaps stay intact; clothes are overlays. */
+export default function RadRack({ friendId, client, paused }: GameComponentProps) {
+  const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
+  const [sprites, setSprites] = useState<GenerationSprites | null>(null);
+  const [spriteError, setSpriteError] = useState("");
+  const [spriteNote, setSpriteNote] = useState("");
+  const [retry, setRetry] = useState(0);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [revealId, setRevealId] = useState<number | null>(null);
+  const [worn, setWorn] = useState<ReadonlySet<number>>(() => new Set());
+  const [muted, setMuted] = useState(true);
+  const [motionPref, setMotionPref] = useState(false);
+  const [motionOverride, setMotionOverride] = useState<boolean | null>(null);
+  const [caption, setCaption] = useState("");
+  const [flash, setFlash] = useState(false);
+  const [room, setRoom] = useState<Room>("rack");
+  const [move, setMove] = useState(0);
+  const [tape, setTape] = useState(0);
+  const [equipped, setEquipped] = useState(0);
+  const [ownedSkates, setOwnedSkates] = useState<ReadonlySet<number>>(() => new Set([0]));
+  const [skateSpent, setSkateSpent] = useState(0n);
+  const [ownedMasks, setOwnedMasks] = useState<ReadonlySet<number>>(() => new Set([0]));
+  const [mask, setMask] = useState(0);
+  const [maskSpent, setMaskSpent] = useState(0n);
+  const [photos, setPhotos] = useState<SavedPhoto[]>([]);
+  const [viewPhoto, setViewPhoto] = useState<number | null>(null);
+  const [laps, setLaps] = useState(0);
+  const [lights, setLights] = useState<readonly boolean[]>([true, false, false]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const portraitRef = useRef<HTMLCanvasElement>(null);
+  const sound = useRef<FriendSoundKit | null>(null);
+  const music = useRef<ClubMusic | null>(null);
+  const locked = useRef(false);
+  const epoch = useRef(0);
+  const heard = useRef(false);
+  const reduced = motionOverride ?? motionPref;
+  const wornLooks = LOOKS.filter((_, index) => worn.has(index));
+  const live = useRef<Live>({
+    paused: false,
+    reduced: false,
+    worn: [],
+    sprites: null,
+    held: new Set(),
+    lane: 0,
+    place: { nx: 0.46, ny: 0.68 },
+    aim: null,
+    aimLane: null,
+    floor: { nx: 0.42, ny: 0.84 },
+    floorAim: null,
+    fitUntil: 0,
+    outfitUntil: 0,
+    maskUntil: 0,
+    shotMask: -1,
+    shotReady: 0,
+    closet: 0,
+    speed: 0,
+    side: "right",
+    room: "rack",
+    move: 0,
+    muted: true,
+    skate: 0.4,
+    quad: 0,
+    mask: 0,
+    lapMark: 0.5,
+    lapShown: 0,
+    crack: 0,
+    lights: [true, false, false],
+    hold: 0,
+    latched: false,
+    cross: () => {},
+    cycleMove: () => {},
+  });
+  live.current.paused = paused || panel !== null;
+  live.current.reduced = reduced;
+  live.current.worn = wornLooks;
+  live.current.sprites = sprites;
+  live.current.room = room;
+  live.current.move = move;
+  live.current.muted = muted;
+  live.current.quad = equipped;
+  live.current.mask = mask;
+  live.current.lights = lights;
+
+  useEffect(() => {
+    music.current?.select(tape);
+    if (!live.current.muted) music.current?.start();
+  }, [tape]);
+
+  useEffect(() => {
+    const canvas = portraitRef.current;
+    const photo = photos.find((item) => item.id === viewPhoto);
+    if (!canvas || !photo || !sprites) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const frame = spriteFrame(sprites, "down", false, 0, "right").frame.rows;
+    const looks = LOOKS.filter((_, index) => photo.worn.includes(index));
+    paintPortrait(ctx, canvas.width, canvas.height, frame, looks, maskById(photo.mask));
+  }, [viewPhoto, photos, sprites, panel]);
+
+  useEffect(() => {
+    const version = ++epoch.current;
+    sound.current = createFriendSoundKit({ muted: true });
+    setSnapshot(null);
+    setError("");
+    setBusy(false);
+    setPanel(null);
+    setRevealId(null);
+    setMuted(true);
+    setRoom("rack");
+    setMove(0);
+    setEquipped(0);
+    setOwnedSkates(new Set([0]));
+    setSkateSpent(0n);
+    setOwnedMasks(new Set([0]));
+    setMask(0);
+    setMaskSpent(0n);
+    setPhotos([]);
+    setViewPhoto(null);
+    locked.current = false;
+    live.current.room = "rack";
+    live.current.lane = 0;
+    live.current.place = { nx: 0.46, ny: 0.68 };
+    live.current.aim = null;
+    live.current.aimLane = null;
+    live.current.closet = 0;
+    live.current.latched = false;
+    live.current.shotMask = -1;
+    live.current.maskUntil = 0;
+    music.current?.stop();
+    void client
+      .read()
+      .then((value) => {
+        if (version === epoch.current) setSnapshot(value);
+      })
+      .catch((cause: unknown) => {
+        if (version === epoch.current) {
+          setError(cause instanceof Error ? cause.message : "Could not load the fitting room.");
+        }
+      });
+    return () => {
+      epoch.current += 1;
+      sound.current?.dispose();
+      sound.current = null;
+    };
+  }, [client, friendId]);
+
+  useEffect(() => {
+    const track = createClubMusic();
+    music.current = track;
+    return () => {
+      track.dispose();
+      if (music.current === track) music.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    setSpriteError("");
+    setSpriteNote("");
+    const cached = sampleFriendSprites(friendId);
+    setSprites(cached ?? null);
+    void createFriendReader()
+      .read(friendId)
+      .then((value) => {
+        if (alive) setSprites(value);
+      })
+      .catch((cause: unknown) => {
+        if (!alive) return;
+        if (cached) {
+          setSpriteNote("Chain art didn't answer. Showing the cached sample of this Friend.");
+          return;
+        }
+        setSpriteError(cause instanceof Error ? cause.message : "Could not load this Friend's artwork.");
+      });
+    return () => {
+      alive = false;
+    };
+  }, [friendId, retry]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => setMotionPref(media.matches);
+    apply();
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    sound.current?.setMuted(muted);
+  }, [muted]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    let frame = 0;
+    let previous = 0;
+    const state = live.current;
+    const probe = {
+      getX: () => state.lane,
+      getYaw: () => 0,
+      getSpeed: () => state.speed,
+      setKeys: (codes: string[]) => {
+        state.held = new Set(codes);
+      },
+    };
+    window.__controlsTest = probe;
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, previous ? (now - previous) / 1000 : 0);
+      previous = now;
+      const held = state.held;
+      let dir = 0;
+      let vert = 0;
+      if (!state.paused) {
+        if (held.has("KeyA") || held.has("ArrowLeft") || held.has("TouchLeft")) dir -= 1;
+        if (held.has("KeyD") || held.has("ArrowRight") || held.has("TouchRight")) dir += 1;
+        if (held.has("KeyW") || held.has("ArrowUp")) vert -= 1;
+        if (held.has("KeyS") || held.has("ArrowDown")) vert += 1;
+      }
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const height = Math.max(1, rect.height);
+      state.speed = Math.abs(dir) * 7;
+      let walking = state.room === "rink" ? !state.reduced : dir !== 0;
+      if (state.room === "rink") {
+        state.skate += dt * (state.reduced ? 0.45 : 1.15 + dir * 0.6);
+        const turned = (state.skate - state.lapMark) / (Math.PI * 2);
+        const whole = Math.min(6, Math.max(0, Math.floor(turned)));
+        if (whole !== state.lapShown) {
+          state.lapShown = whole;
+          setLaps(whole);
+        }
+        if (state.crack === 0 && turned >= 6) {
+          state.crack = now;
+          setCaption("The floor cracked");
+        }
+        if (state.crack > 0 && now - state.crack > 1300) {
+          state.room = "under";
+          state.crack = 0;
+          state.latched = true;
+          setRoom("under");
+          setCaption("Under the mall");
+        }
+      } else if (state.room === "rack") {
+        if (dir !== 0) {
+          state.aim = null;
+          state.place.nx = Math.min(0.8, Math.max(0.16, state.place.nx + dir * 0.38 * dt));
+          state.place.ny = 0.68;
+        } else if (state.aim) {
+          const dx = state.aim.nx - state.place.nx;
+          const dy = state.aim.ny - state.place.ny;
+          const dist = Math.hypot(dx, dy);
+          const step = Math.min(dist, 0.72 * dt);
+          if (dist > 0.001) {
+            state.place.nx += (dx / dist) * step;
+            state.place.ny += (dy / dist) * step;
+          }
+          if (dx < -0.01) state.side = "left";
+          if (dx > 0.01) state.side = "right";
+          walking = dist > 0.02;
+          if (dist < 0.02) state.aim = null;
+        }
+        const atCurtain =
+          state.place.nx >= WARDROBE_CURTAIN.x &&
+          state.place.nx <= WARDROBE_CURTAIN.x + WARDROBE_CURTAIN.w &&
+          state.place.ny >= WARDROBE_CURTAIN.y &&
+          state.place.ny <= WARDROBE_CURTAIN.y + WARDROBE_CURTAIN.h;
+        if (!state.paused && atCurtain && !state.latched) state.cross("rink");
+        if (state.closet > 0 && now - state.closet > 420 && !state.latched) state.cross("in");
+        if (!atCurtain && state.closet === 0) state.latched = false;
+      } else if (state.room === "club") {
+        if (dir !== 0 || vert !== 0) {
+          state.floorAim = null;
+          state.floor.nx = Math.min(0.88, Math.max(0.12, state.floor.nx + dir * 0.48 * dt));
+          state.floor.ny = Math.min(0.92, Math.max(0.4, state.floor.ny + vert * 0.48 * dt));
+          walking = true;
+        } else if (state.floorAim) {
+          const dx = state.floorAim.nx - state.floor.nx;
+          const dy = state.floorAim.ny - state.floor.ny;
+          const dist = Math.hypot(dx, dy);
+          const step = Math.min(dist, 0.7 * dt);
+          if (dist > 0.001) {
+            state.floor.nx += (dx / dist) * step;
+            state.floor.ny += (dy / dist) * step;
+          }
+          if (dx < -0.01) state.side = "left";
+          if (dx > 0.01) state.side = "right";
+          walking = dist > 0.02;
+          if (Math.abs(dx) > Math.abs(dy)) state.side = dx < 0 ? "left" : "right";
+          if (dist < 0.02) state.floorAim = null;
+        }
+      }
+      if (dir < 0) state.side = "left";
+      if (dir > 0) state.side = "right";
+      const facing: SpriteFacing =
+        state.room === "rink"
+          ? rinkSpot(state.skate, width, height).facing
+          : state.room === "club"
+            ? walking && (dir !== 0 || (state.floorAim && Math.abs(state.floorAim.nx - state.floor.nx) > Math.abs(state.floorAim.ny - state.floor.ny)))
+              ? state.side
+              : "down"
+            : walking
+              ? state.side
+              : "down";
+      const frameIndex = state.reduced ? 0 : Math.floor(now / 110) % 8;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const pixelW = Math.floor(width * dpr);
+      const pixelH = Math.floor(height * dpr);
+      if (canvas.width !== pixelW || canvas.height !== pixelH) {
+        canvas.width = pixelW;
+        canvas.height = pixelH;
+      }
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.imageSmoothingEnabled = false;
+      const beat = music.current?.beat() ?? 0;
+      const restRows = state.sprites ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows : null;
+      if (state.room === "club") {
+        const friendRows = state.sprites
+          ? spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows
+          : null;
+        paintClub(context, width, height, friendRows, state.worn, state.floor, state.move, beat, state.reduced, now, walking, restRows);
+      } else if (state.room === "rink") {
+        const friendRows = state.sprites
+          ? spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows
+          : null;
+        const crack = state.crack > 0 ? Math.min(1, (now - state.crack) / 1100) : 0;
+        paintRink(context, width, height, friendRows, state.worn, state.skate, state.reduced, now, skateById(state.quad), now < state.fitUntil, crack, restRows);
+      } else if (state.room === "under") {
+        const friendRows = state.sprites
+          ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows
+          : null;
+        paintUnder(context, width, height, friendRows, state.worn, state.lights, restRows);
+      } else if (state.room === "photo") {
+        const friendRows = state.sprites
+          ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows
+          : null;
+        const shot = state.shotMask > 0 && now >= state.shotReady ? maskById(state.shotMask) : null;
+        paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows);
+      } else if (state.sprites) {
+        const rows = spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows;
+        paintStage(context, width, height, rows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil));
+      } else {
+        context.clearRect(0, 0, width, height);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      state.held.clear();
+    };
+    const onHide = () => {
+      if (document.hidden) stop();
+    };
+    frame = requestAnimationFrame(tick);
+    window.addEventListener("blur", stop);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("blur", stop);
+      document.removeEventListener("visibilitychange", onHide);
+      if (window.__controlsTest === probe) delete window.__controlsTest;
+    };
+  }, []);
+
+  useEffect(() => {
+    const down = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (event.key === "Escape") {
+        setPanel(null);
+        return;
+      }
+      if (live.current.paused) return;
+      const key = event.key.toLowerCase();
+      if (event.code === "KeyA" || event.code === "KeyD" || event.code === "KeyW" || event.code === "KeyS" || event.code === "ArrowLeft" || event.code === "ArrowRight" || event.code === "ArrowUp" || event.code === "ArrowDown") {
+        live.current.held.add(event.code);
+        event.preventDefault();
+        unlock();
+        if (
+          (event.code === "KeyD" || event.code === "ArrowRight") &&
+          live.current.room === "rack" &&
+          live.current.lane > 7.15
+        ) {
+          live.current.cross("in");
+        }
+        if (
+          (event.code === "KeyA" || event.code === "ArrowLeft") &&
+          live.current.room === "rack" &&
+          live.current.lane < -7.15
+        ) {
+          live.current.cross("rink");
+        }
+      } else if (!event.repeat && event.code === "Space") {
+        event.preventDefault();
+        if (live.current.room === "club") live.current.cycleMove();
+        else pose();
+      } else if (!event.repeat && key >= "1" && key <= "9") {
+        toggleWear(Number(key) - 1);
+      } else if (!event.repeat && key === "0") {
+        toggleWear(9);
+      } else if (key === "p" && !event.repeat) {
+        pose();
+      }
+    };
+    const up = (event: KeyboardEvent) => {
+      live.current.held.delete(event.code);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
+
+  function buySkate(id: number, fromDesk = false) {
+    const skate = skateById(id);
+    if (!skate || (live.current.paused && !fromDesk)) return;
+    if (ownedSkates.has(id)) {
+      setEquipped(id);
+      live.current.quad = id;
+      if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
+      note(`${skate.name} on`);
+      return;
+    }
+    if (fromDesk) return;
+    if (purse < skate.price) {
+      note("Not enough RF for those skates");
+      return;
+    }
+    setSkateSpent((spent) => spent + skate.price);
+    setOwnedSkates((owned) => new Set(owned).add(id));
+    setEquipped(id);
+    live.current.quad = id;
+    if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
+    note(`${skate.name} bought`);
+  }
+
+  function buyMask(id: number) {
+    const rare = weeklyRareMask();
+    const item = id >= 200 ? rare : MASKS[id];
+    if (!item || live.current.paused || live.current.room !== "photo") return;
+    if (id >= 200 && rare.id !== id) return;
+    if (ownedMasks.has(id)) {
+      setMask(id);
+      live.current.mask = id;
+      note(`${item.name} on`);
+      return;
+    }
+    if (purse < item.price) {
+      note("Not enough RF for that mask");
+      return;
+    }
+    setMaskSpent((spent) => spent + item.price);
+    setOwnedMasks((owned) => new Set(owned).add(id));
+    setMask(id);
+    live.current.mask = id;
+    note(`${item.name} bought`);
+  }
+
+  function unlock() {
+    void sound.current?.unlock();
+    music.current?.unlock();
+    if (!heard.current && live.current.muted) {
+      heard.current = true;
+      live.current.muted = false;
+      setMuted(false);
+      music.current?.setMuted(false);
+      music.current?.start();
+    }
+  }
+
+  function flipLight(index: number) {
+    setLights((current) => {
+      const next = [...current];
+      next[index] = !next[index];
+      next[(index + 1) % 3] = !next[(index + 1) % 3];
+      return next;
+    });
+    note("Still an odd number of lights");
+  }
+
+  function buyOut() {
+    if (live.current.room !== "under" || !snapshot || snapshot.consumables < 3n) {
+      note("Need 3 tokens");
+      return;
+    }
+    void act(async () => {
+      const played = await client.play(3n);
+      for (const play of played) await client.settle(play.id);
+      const state = live.current;
+      state.room = "rack";
+      state.latched = true;
+      state.crack = 0;
+      state.lapShown = 0;
+      state.place = { nx: 0.46, ny: 0.68 };
+      state.aim = null;
+      setLaps(0);
+      setRoom("rack");
+      note("Spent 3 tokens");
+    });
+  }
+
+  function note(text: string) {
+    setCaption(text);
+    window.setTimeout(() => setCaption((current) => (current === text ? "" : current)), 1100);
+  }
+
+  function cross(way: "in" | "out" | "rink" | "photo", fromButton = false) {
+    const state = live.current;
+    if (state.paused) return;
+    if (!fromButton && state.latched) return;
+    if (way === "out") {
+      if (state.room === "rack" || state.room === "under") return;
+      state.latched = true;
+      if (state.room === "photo") {
+        state.room = "rink";
+        setRoom("rink");
+        note("The rink");
+        return;
+      }
+      state.room = "rack";
+      state.lane = 0;
+      state.place = { nx: 0.46, ny: 0.68 };
+      state.aim = null;
+      state.aimLane = null;
+      state.closet = 0;
+      state.hold = 0;
+      setRoom("rack");
+      note("Back at the rack");
+      return;
+    }
+    if (way === "photo") {
+      if (state.room !== "rink") return;
+      state.latched = true;
+      state.room = "photo";
+      setRoom("photo");
+      note("Photo booth");
+      return;
+    }
+    if (state.room !== "rack") return;
+    if (way === "in" && state.worn.length === 0) {
+      state.latched = true;
+      note("Put a look on first");
+      return;
+    }
+    state.latched = true;
+    state.room = way === "rink" ? "rink" : "club";
+    state.lane = 0;
+    state.place = { nx: 0.46, ny: 0.68 };
+    state.aim = null;
+    state.closet = 0;
+    state.hold = 0;
+    if (way === "rink") {
+      state.skate = 0.5;
+      state.lapMark = 0.5;
+      state.lapShown = 0;
+      state.crack = 0;
+      setLaps(0);
+    }
+    setRoom(state.room);
+    note(way === "rink" ? "The rink" : "The Floor");
+    if (!state.muted) {
+      music.current?.setMuted(false);
+      music.current?.unlock();
+      music.current?.start();
+    }
+  }
+
+  function cycleMove() {
+    if (live.current.paused || live.current.room !== "club") return;
+    unlock();
+    const next = (live.current.move + 1) % DANCE_MOVES.length;
+    live.current.move = next;
+    setMove(next);
+    note(DANCE_MOVES[next] ?? "Dance");
+    sound.current?.play("select");
+  }
+
+  live.current.cross = cross;
+  live.current.cycleMove = cycleMove;
+
+  function toggleWear(index: number) {
+    if ((live.current.paused && panel !== "desk") || index < 0 || index >= LOOKS.length) return;
+    const puttingOn = !worn.has(index);
+    setWorn((current) => {
+      const next = new Set(current);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+    if (puttingOn) {
+      live.current.worn = LOOKS.filter((_, look) => look === index || worn.has(look));
+      live.current.outfitUntil = performance.now() + 1800;
+    }
+    sound.current?.play("select");
+  }
+
+  function pose() {
+    if (live.current.paused) return;
+    unlock();
+    sound.current?.play("impact");
+    setCaption("Totally rad");
+    window.setTimeout(() => setCaption(""), 900);
+    if (!live.current.reduced) {
+      setFlash(true);
+      window.setTimeout(() => setFlash(false), 180);
+    }
+  }
+
+  async function act(work: () => Promise<void>, cue?: FriendSoundCue) {
+    if (locked.current || paused) return;
+    const version = epoch.current;
+    locked.current = true;
+    setBusy(true);
+    setError("");
+    unlock();
+    try {
+      await work();
+      const value = await client.read();
+      if (version === epoch.current) {
+        setSnapshot(value);
+        if (cue) sound.current?.play(cue);
+      }
+    } catch (cause) {
+      if (version === epoch.current) {
+        setError(cause instanceof Error ? cause.message : "That action failed.");
+      }
+    } finally {
+      if (version === epoch.current) {
+        locked.current = false;
+        setBusy(false);
+      }
+    }
+  }
+
+  async function changeTape() {
+    if (!snapshot || snapshot.consumables < 1n) {
+      note("Need a mall token");
+      return;
+    }
+    const next = (tape + 1) % TAPES.length;
+    const title = TAPES[next]?.title ?? "New tape";
+    await act(async () => {
+      const current = await client.read();
+      const pending = current.plays.find((play) => play.outcomeId === null);
+      const play = pending ?? (await client.play(1n))[0];
+      if (!play) throw new Error("No token for the jukebox.");
+      const settled = await client.settle(play.id);
+      setTape(next);
+      const pulled = settled.outcomeId ? definition.outcomes[settled.outcomeId - 1]?.name : "";
+      note(pulled ? `${title}. Also pulled ${pulled}.` : title);
+    });
+  }
+
+  function holdWalk(code: string, down: boolean) {
+    if (down) {
+      live.current.held.add(code);
+      unlock();
+      return;
+    }
+    live.current.held.delete(code);
+    if (code === "TouchRight" && live.current.room === "rack" && live.current.lane > 6.4) live.current.cross("in");
+    if (code === "TouchLeft" && live.current.room === "rack" && live.current.lane < -6.4) live.current.cross("rink");
+  }
+
+  const definition = client.definition;
+  const price = definition.price;
+  const maxPrize = maximumPrize(definition);
+  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent ? snapshot.rfBalance - skateSpent - maskSpent : 0n) : 0n;
+  const afford = snapshot ? purse >= price : false;
+  const backed = snapshot ? snapshot.freeStake >= maxPrize && snapshot.freeStake + price >= maxPrize : false;
+  const wornNames = wornLooks.map((look) => look.name).join(", ");
+  const trackTitle = TAPES[tape]?.title ?? "Cursor";
+
+  return (
+    <section
+      className="rad"
+      data-motion={reduced ? "off" : "on"}
+      data-room={room}
+      aria-label={room === "club" ? "The Floor dance room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
+      onPointerDown={unlock}
+    >
+      <header className="rad-top">
+        <div className="rad-brand">
+          <p className="rad-mark">Rad Rack</p>
+          <p className="rad-friend">
+            {sprites ? `${sprites.familyName} #${friendId.toString()}` : `Friend #${friendId.toString()}`}
+          </p>
+        </div>
+        <div className="rad-meters">
+          <span>{snapshot ? rf(purse) : "…"}</span>
+          <span>{snapshot ? `${snapshot.consumables.toString()} ${snapshot.consumables === 1n ? "token" : "tokens"}` : ""}</span>
+        </div>
+        <div className="rad-tools">
+          <button
+            type="button"
+            aria-pressed={!muted}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              heard.current = true;
+              const next = !live.current.muted;
+              live.current.muted = next;
+              void sound.current?.unlock();
+              music.current?.setMuted(next);
+              if (!next) {
+                music.current?.unlock();
+                music.current?.start();
+              }
+              setMuted(next);
+            }}
+          >
+            {muted ? "Sound off" : "Sound on"}
+          </button>
+          <button
+            type="button"
+            aria-pressed={reduced}
+            onClick={() => setMotionOverride(!reduced)}
+          >
+            {reduced ? "Motion off" : "Motion on"}
+          </button>
+        </div>
+      </header>
+
+      <div className="rad-stage">
+        <canvas
+          ref={canvasRef}
+          aria-label={
+            room === "club"
+              ? `The Floor. Friend ${friendId.toString()} wearing ${wornNames || "a look"}, move ${DANCE_MOVES[move] ?? "Bounce"}. Tap anywhere on the floor to walk there. ${trackTitle} is playing.`
+              : room === "rink"
+                ? `Roller rink. Friend ${friendId.toString()} is skating with the crowd to ${trackTitle}. Back to the rack leaves the rink.`
+                : `Rare Friend ${friendId.toString()} wearing ${wornNames || "no 80s clothes yet"}. Tap the floor to walk. The Yours sign is the table. The curtain goes to the rink. The closet opens onto the dance floor.`
+          }
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            unlock();
+            const state = live.current;
+            if (state.paused) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const y = event.clientY - rect.top;
+            if (state.room === "rack") {
+              const hit = wardrobeHit(rect.width, rect.height, x, y);
+              if (hit === "desk") {
+                setPanel("desk");
+                return;
+              }
+              if (hit === "closet") {
+                if (state.worn.length === 0) {
+                  note("Put a look on first");
+                  return;
+                }
+                state.closet = performance.now();
+                state.aim = { nx: 0.66, ny: 0.64 };
+                return;
+              }
+              if (hit === "curtain") {
+                state.cross("rink");
+                return;
+              }
+              if (hit) state.aim = hit;
+            } else if (state.room === "club") {
+              const spot = clubPoint(rect.width, rect.height, x, y);
+              if (spot) state.floorAim = spot;
+            } else if (state.room === "rink") {
+              if (rinkBoothHit(rect.width, rect.height, x, y)) state.cross("photo", true);
+            } else if (state.room === "photo") {
+              if (state.mask <= 0) {
+                note("Put a mask on first");
+                return;
+              }
+              const ready = performance.now() + 1800;
+              state.maskUntil = ready;
+              state.shotMask = state.mask;
+              state.shotReady = ready;
+              setPhotos((list) => [
+                ...list,
+                { id: list.length + 1, mask: state.mask, worn: [...worn].sort((a, b) => a - b) },
+              ]);
+              if (!state.reduced) {
+                setFlash(true);
+                window.setTimeout(() => setFlash(false), 160);
+              }
+              note("Cheese");
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="rad-walk rad-walk-left"
+          aria-label="Walk left"
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            holdWalk("TouchLeft", true);
+          }}
+          onPointerUp={() => holdWalk("TouchLeft", false)}
+          onPointerCancel={() => holdWalk("TouchLeft", false)}
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          className="rad-walk rad-walk-right"
+          aria-label="Walk right"
+          onPointerDown={(event) => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            holdWalk("TouchRight", true);
+          }}
+          onPointerUp={() => holdWalk("TouchRight", false)}
+          onPointerCancel={() => holdWalk("TouchRight", false)}
+        >
+          →
+        </button>
+        {flash && <div className="rad-flash" aria-hidden="true" />}
+        {caption && <p className={caption === "Cheese" ? "rad-caption rad-caption-right" : "rad-caption"}>{caption}</p>}
+        {!sprites && (
+          <div className="rad-loading" role={spriteError ? "alert" : "status"}>
+            <p>{spriteError || "Pulling this Friend's pixels…"}</p>
+            {spriteError && (
+              <button type="button" onClick={() => setRetry((value) => value + 1)}>
+                Retry artwork
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <p className="rad-status" role={error ? "alert" : "status"}>
+        {error ||
+          spriteNote ||
+          (busy
+            ? "Waiting on the simulated counter…"
+            : room === "club"
+              ? muted
+                ? `Sound is off. Tap the room or Sound on to hear ${trackTitle}. Back to the rack leaves the floor.`
+                : `${trackTitle} is playing. Dance changes your move. Back to the rack leaves the floor.`
+              : room === "under"
+                ? "Under the mall. The lights cannot all go out. Spend 3 tokens to get back up."
+              : room === "photo"
+                ? "Photo booth. Put a mask on, then tap the room. The picture projects on the floor."
+              : room === "rink"
+                ? `${trackTitle} on the rink. Lap ${laps} of 6. The booth up on the right is the photo booth.`
+                : worn.size > 0
+                  ? "Clothes on. Right door is the club. Left door is the rink."
+                  : "Try a look on, or tap the table to see what you own. The club stays shut until your Friend is dressed.")}
+      </p>
+
+      {room === "under" ? (
+        <div className="rad-rack" aria-label="Impossible lights">
+          {lights.map((on, index) => (
+            <button key={index} type="button" className="rad-look" aria-pressed={on} onClick={() => flipLight(index)}>
+              <span className="rad-swatch" style={{ background: on ? "#ffe14a" : "#2a2418" }} aria-hidden="true" />
+              <span className="rad-look-name">Switch {index + 1}</span>
+              <small>{on ? "On" : "Off"}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {room === "under" ? (
+        <div className="rad-actions">
+          <button type="button" className="rad-primary" disabled={paused || busy || !snapshot || snapshot.consumables < 3n} onClick={buyOut}>
+            Leave · 3 tokens
+          </button>
+        </div>
+      ) : null}
+
+      {room === "rink" ? (
+        <div className="rad-rack" aria-label="Skate shop">
+          {[...SKATES.map((skate, id) => ({ skate, id, rare: false })), { skate: weeklyRare(), id: weeklyRare().id, rare: true }].map(
+            ({ skate, id, rare }) => {
+              const owned = ownedSkates.has(id);
+              const on = equipped === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className="rad-look"
+                  aria-pressed={on}
+                  disabled={paused}
+                  onClick={() => buySkate(id)}
+                >
+                  <span className="rad-swatch" style={{ background: skate.boot }} aria-hidden="true" />
+                  <span className="rad-look-name">{skate.name}</span>
+                  <small>
+                    {on ? "Skating" : owned ? "Use" : rare ? `Rare · ${rf(skate.price)}` : `Buy · ${rf(skate.price)}`}
+                  </small>
+                </button>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
+      {room === "photo" ? (
+        <div className="rad-rack" aria-label="Photo booth masks">
+          {[...MASKS.map((item, id) => ({ item, id, rare: false })), { item: weeklyRareMask(), id: weeklyRareMask().id, rare: true }].map(
+            ({ item, id, rare }) => {
+              const owned = ownedMasks.has(id);
+              const on = mask === id;
+              return (
+                <button key={id} type="button" className="rad-look" aria-pressed={on} disabled={paused} onClick={() => buyMask(id)}>
+                  <span className="rad-swatch" style={{ background: item.swatch }} aria-hidden="true" />
+                  <span className="rad-look-name">{item.name}</span>
+                  <small>{on ? "Wearing" : owned ? "Try on" : rare ? `Rare · ${rf(item.price)}` : `Buy · ${rf(item.price)}`}</small>
+                </button>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
+      {room === "photo" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>Photo booth</strong>
+            <span>Tap the room for a photo</span>
+          </p>
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the rink
+          </button>
+        </div>
+      ) : null}
+
+      {room === "club" || room === "rink" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>{trackTitle}</strong>
+            <span>{muted ? "Soundtrack ready" : room === "rink" ? "Skating" : DANCE_MOVES[move]}</span>
+          </p>
+          <button
+            type="button"
+            disabled={!snapshot || snapshot.consumables < 1n || busy || paused}
+            onClick={() => void changeTape()}
+          >
+            Change music · 1 token
+          </button>
+          {room === "club" ? (
+            <button type="button" className="rad-floor" disabled={paused} onClick={cycleMove}>
+              Dance
+            </button>
+          ) : null}
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the rack
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="rad-rack" aria-label="80s clothes">
+            {LOOKS.map((look, index) => {
+              const owned = snapshot?.inventory[index] ?? 0n;
+              const on = worn.has(index);
+              return (
+                <button
+                  key={look.name}
+                  type="button"
+                  className="rad-look"
+                  aria-pressed={on}
+                  data-owned={owned > 0n ? "yes" : "no"}
+                  disabled={paused}
+                  onClick={() => toggleWear(index)}
+                >
+                  <span className="rad-swatch" style={{ background: look.swatch }} aria-hidden="true" />
+                  <span className="rad-look-name">{look.name}</span>
+                  <small>{on ? "Wearing" : owned > 0n ? `Owned ${owned.toString()}` : "Try on"}</small>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="rad-actions">
+            <button
+              type="button"
+              className="rad-floor"
+              disabled={paused}
+              onClick={() => cross("rink", true)}
+            >
+              The Rink
+            </button>
+            <button
+              type="button"
+              className="rad-floor"
+              data-open={worn.size > 0 ? "yes" : "no"}
+              disabled={paused}
+              onClick={() => cross("in", true)}
+            >
+              {worn.size > 0 ? "The Floor" : "The Floor locked"}
+            </button>
+            <button
+              type="button"
+              disabled={!snapshot || snapshot.consumables < 1n || busy || paused}
+              onClick={() => void changeTape()}
+            >
+              Change music · 1 token
+            </button>
+            <button
+              type="button"
+              className="rad-primary"
+              disabled={!snapshot || !afford || !backed || busy || paused}
+              onClick={() => void act(() => client.buy(1n), "purchase")}
+            >
+              Buy token · {rf(price)}
+            </button>
+            <button
+              type="button"
+              disabled={!snapshot || snapshot.consumables < 1n || busy || paused}
+              onClick={() =>
+                void act(async () => {
+                  const current = await client.read();
+                  const pending = current.plays.find((play) => play.outcomeId === null);
+                  const play = pending ?? (await client.play(1n))[0];
+                  if (!play) throw new Error("No mall token to open.");
+                  const settled: GamePlay = await client.settle(play.id);
+                  if (!settled.outcomeId) return;
+                  const index = settled.outcomeId - 1;
+                  const bps = definition.outcomes[index]?.chanceBps ?? 10_000;
+                  const cue: FriendSoundCue = bps <= 50 ? "reveal-legendary" : bps <= 500 ? "reveal-rare" : "reveal-common";
+                  sound.current?.play(cue);
+                  setRevealId(settled.outcomeId);
+                  setPanel("reveal");
+                  setWorn((value) => new Set(value).add(index));
+                  live.current.outfitUntil = performance.now() + 1800;
+                })
+              }
+            >
+              Open token
+            </button>
+            <button type="button" disabled={paused} onClick={() => setPanel("odds")}>
+              Odds
+            </button>
+            <button type="button" disabled={paused || worn.size === 0} onClick={() => setWorn(new Set())}>
+              Clear
+            </button>
+            <button type="button" disabled={paused} onClick={pose}>
+              Pose
+            </button>
+          </div>
+        </>
+      )}
+
+      {panel && (
+        <div className="rad-modal" role="dialog" aria-modal="true" aria-labelledby="rad-dialog-title">
+          <div className="rad-dialog">
+            <header>
+              <h2 id="rad-dialog-title">{panel === "odds" ? "Mall odds" : panel === "desk" ? "Your desk" : "You pulled"}</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setPanel(null);
+                  setViewPhoto(null);
+                }}
+                aria-label="Close"
+              >
+                Close
+              </button>
+            </header>
+            {panel === "reveal" && revealId ? (
+              <div className="rad-reveal">
+                <p className="rad-reveal-name">{definition.outcomes[revealId - 1]?.name}</p>
+                <p>{LOOKS[revealId - 1]?.blurb}</p>
+                <p>It's on your Friend. Redeem it later for simulated RF, or keep stacking the fit.</p>
+              </div>
+            ) : panel === "desk" ? (
+              <>
+                <p>Skates, looks, and pictures from the booth. Pictures stay in the closet so you can open them here.</p>
+                {viewPhoto != null ? (
+                  <div className="rad-reveal">
+                    <canvas ref={portraitRef} width={220} height={240} aria-label="Saved picture" />
+                    <p>{maskById(photos.find((item) => item.id === viewPhoto)?.mask ?? 0).name}</p>
+                    <button type="button" onClick={() => setViewPhoto(null)}>
+                      Back to the closet
+                    </button>
+                  </div>
+                ) : (
+                <>
+                <ul className="rad-odds">
+                  {photos.map((photo) => (
+                    <li key={photo.id}>
+                      <div>
+                        <strong>Picture {photo.id}</strong>
+                        <small>Closet · {maskById(photo.mask).name}</small>
+                      </div>
+                      <button type="button" onClick={() => setViewPhoto(photo.id)}>
+                        View
+                      </button>
+                    </li>
+                  ))}
+                  {[...ownedSkates].sort((a, b) => a - b).map((id) => {
+                    const skate = skateById(id);
+                    const on = equipped === id;
+                    return (
+                      <li key={id}>
+                        <div>
+                          <strong>{skate.name}</strong>
+                          <small>{id >= 100 ? "Rare skate" : "Skate"}{on ? " · on your feet" : ""}</small>
+                        </div>
+                        <button type="button" onClick={() => buySkate(id, true)}>
+                          {on ? "Skating" : "Use"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                  {LOOKS.map((look, index) => {
+                    const count = snapshot?.inventory[index] ?? 0n;
+                    if (count < 1n) return null;
+                    const on = worn.has(index);
+                    return (
+                      <li key={look.name}>
+                        <div>
+                          <strong>{look.name}</strong>
+                          <small>Look · owned {count.toString()}{on ? " · wearing" : ""}</small>
+                        </div>
+                        <button type="button" onClick={() => toggleWear(index)}>
+                          {on ? "Take off" : "Wear"}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {(snapshot?.inventory.every((count) => count < 1n) ?? true) && photos.length === 0 ? (
+                  <p>No looks yet. Open a mall token at the rack.</p>
+                ) : null}
+                </>
+                )}
+              </>
+            ) : (
+              <>
+                <p>
+                  One mall token costs {rf(price)} of simulated $RAREFRIENDS and opens into one look. Expected return is under the
+                  price, so the rack is a sink. Nothing here sends a transaction.
+                </p>
+                <ul className="rad-odds">
+                  {definition.outcomes.map((outcome, index) => {
+                    const count = snapshot?.inventory[index] ?? 0n;
+                    return (
+                      <li key={outcome.name}>
+                        <div>
+                          <strong>{outcome.name}</strong>
+                          <small>
+                            {chanceLabel(outcome.chanceBps)} · redeem {rf(outcome.reward)} · owned {count.toString()}
+                          </small>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={count < 1n || busy || paused}
+                          onClick={() => void act(() => client.redeem(index + 1, 1n), "reward")}
+                        >
+                          Redeem
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <footer className="rad-foot">
+        {room === "club"
+          ? `${trackTitle} is the soundtrack. One mall token changes the tape. A/D or arrows walk. Space or Dance changes the move. Back to the rack leaves the floor.`
+          : room === "rink"
+            ? `${trackTitle} is playing. One mall token changes the tape. Back to the rack leaves the rink.`
+            : "Left door is the roller rink. Right door is the club once you're dressed. One mall token changes the music."}
+        {room === "rack" && !backed && snapshot ? " Open a token before buying another — the preview reserve is full." : ""}
+        {room === "rack" && !afford && snapshot ? " Not enough simulated RF." : ""}
+      </footer>
+    </section>
+  );
+}

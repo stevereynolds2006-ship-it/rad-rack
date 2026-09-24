@@ -1,0 +1,17 @@
+{
+  "name": "Rad Rack",
+  "consumable": "Mall token",
+  "price": "1000000000000000000",
+  "outcomes": [
+    { "name": "Sweatband", "chanceBps": 1800, "reward": "250000000000000000" },
+    { "name": "Fingerless gloves", "chanceBps": 1600, "reward": "300000000000000000" },
+    { "name": "Leg warmers", "chanceBps": 1500, "reward": "350000000000000000" },
+    { "name": "Shutter shades", "chanceBps": 1400, "reward": "500000000000000000" },
+    { "name": "Walkman phones", "chanceBps": 1200, "reward": "700000000000000000" },
+    { "name": "Neon windbreaker", "chanceBps": 1000, "reward": "1000000000000000000" },
+    { "name": "Parachute pants", "chanceBps": 800, "reward": "1200000000000000000" },
+    { "name": "Boombox", "chanceBps": 500, "reward": "2000000000000000000" },
+    { "name": "Members jacket", "chanceBps": 180, "reward": "4000000000000000000" },
+    { "name": "Lightning earring", "chanceBps": 20, "reward": "8000000000000000000" }
+  ]
+}

@@ -239,3 +239,83 @@ export function chanceLabel(bps: number): string {
   const pct = bps / 100;
   return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
 }
+
+const RF = 10n ** 18n;
+const WEEK = 7 * 24 * 60 * 60 * 1000;
+
+export const LOOK_PRICES: readonly bigint[] = [1n, 2n, 2n, 3n, 3n, 4n, 5n, 6n, 7n, 4n].map((price) => price * RF);
+
+const RARE_LOOKS: readonly (Look & { readonly price: bigint })[] = [
+  {
+    name: "Gold sweatband",
+    blurb: "The rare one this week.",
+    swatch: G,
+    price: 8n * RF,
+    back: [],
+    front: stamp(`....GGGGGGGG....\n...G........G...`, 0, 1),
+  },
+  {
+    name: "Laser visor",
+    blurb: "The rare one this week.",
+    swatch: C,
+    price: 9n * RF,
+    back: [],
+    front: stamp(`..CCCCCCCCCCCC..\n..CKKKCKKKCKCC..\n..CCCCCCCCCCCC..`, 0, 4),
+  },
+  {
+    name: "Tiger jacket",
+    blurb: "The rare one this week.",
+    swatch: "#ff7a1a",
+    price: 10n * RF,
+    back: stamp(
+      `
+.MMMMMMMMMMMMMM.
+MM.GGGGGGGGGG.MM
+MM............MM
+.M............M.
+MM............MM
+.GG..........GG.
+`,
+      0,
+      6,
+    ),
+    front: [],
+  },
+  {
+    name: "Mirror pants",
+    blurb: "The rare one this week.",
+    swatch: W,
+    price: 8n * RF,
+    back: stamp(
+      `
+.WWWWWWWWWWWWWW.
+WWWWWWWWWWWWWWWW
+.CCCCCCCCCCCCCC.
+WWWWWWWWWWWWWWWW
+.MMMM......MMMM.
+`,
+      -1,
+      12,
+    ),
+    front: [],
+  },
+  {
+    name: "Chrome bolt",
+    blurb: "The rare one this week.",
+    swatch: C,
+    price: 8n * RF,
+    back: [],
+    front: stamp(`C.\nMC\n.C\nC.`, 14, 3),
+  },
+];
+
+export function weeklyRareLook(now = Date.now()): Look & { readonly price: bigint; readonly id: number } {
+  const index = Math.floor(now / WEEK) % RARE_LOOKS.length;
+  const look = RARE_LOOKS[index] ?? RARE_LOOKS[0];
+  return { ...look, id: 100 + index };
+}
+
+export function lookById(id: number): Look & { readonly price: bigint } {
+  if (id >= 100) return RARE_LOOKS[id - 100] ?? { ...LOOKS[0], price: LOOK_PRICES[0] ?? RF };
+  return { ...(LOOKS[id] ?? LOOKS[0]), price: LOOK_PRICES[id] ?? RF };
+}

@@ -114,23 +114,6 @@
   display: block;
 }
 
-.rad-walk {
-  position: absolute;
-  top: auto;
-  bottom: 10px;
-  width: 52px;
-  height: 48px;
-  padding: 0;
-  font-size: 22px;
-  background: #f4ecdf;
-  color: var(--ink);
-  border-color: var(--magenta);
-  z-index: 2;
-}
-
-.rad-walk-left { left: 8px; }
-.rad-walk-right { right: 8px; }
-
 .rad-flash {
   position: absolute;
   inset: 0;
@@ -143,7 +126,8 @@
   position: absolute;
   left: 50%;
   top: 16px;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(0.5);
+  transform-origin: top center;
   margin: 0;
   padding: 8px 12px;
   background: var(--magenta);
@@ -156,7 +140,8 @@
 .rad-caption-right {
   left: auto;
   right: 16px;
-  transform: none;
+  transform: scale(0.5);
+  transform-origin: top right;
 }
 
 .rad-loading {

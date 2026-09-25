@@ -10,7 +10,6 @@ const MAGENTA = "#ff2bd6";
 const CYAN = "#39f2e4";
 const GOLD = "#e6c36a";
 const RF = 10n ** 18n;
-
 export type Mask = {
   name: string;
   price: bigint;
@@ -429,7 +428,7 @@ export function paintRink(
 
   function paintFriendOnRink() {
     if (!rows || !friendSpot) return;
-    const friendScale = Math.max(2, Math.round((people / 16) * 1.5 * (1 - crack * 0.7)));
+    const friendScale = Math.max(2, Math.round((people / 16) * (1 - crack * 0.7)));
     const bob = reduced ? 0 : Math.round(Math.sin(now / 120) * friendScale * 0.6);
     const originX = Math.round(friendSpot.x - 8 * friendScale);
     const originY = Math.round(friendSpot.y - 16 * friendScale + bob + crack * layout.h * 0.42);
@@ -444,7 +443,7 @@ export function paintRink(
   if (fitting && rows && crack <= 0) {
     ctx.fillStyle = "rgba(8,4,14,0.62)";
     ctx.fillRect(0, 0, width, height);
-    const friendScale = Math.max(6, Math.round(Math.min(width, height) / 12));
+    const friendScale = Math.max(6, Math.round(Math.min(width, height) / 18));
     const originX = Math.round(width / 2 - 8 * friendScale);
     const originY = Math.round(height / 2 - 8 * friendScale);
     const bob = reduced ? 0 : Math.round(Math.sin(now / 160) * friendScale * 0.35);
@@ -529,7 +528,7 @@ export function paintUnder(
     }
   });
   if (!rows) return;
-  const scale = Math.max(3, Math.round(height / 47));
+  const scale = Math.max(3, Math.round(height / 29));
   const footX = width * 0.5;
   const footY = height * 0.78;
   ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -572,7 +571,7 @@ export function paintStudio(
   if (!rows) return;
   const centerX = layout.x + layout.w * 0.613;
   const centerY = layout.y + layout.h * 0.363;
-  const shot = Math.max(2, Math.round(layout.h * 0.33 / 16));
+  const shot = Math.max(2, Math.round(layout.h * 0.22 / 16));
   paintFriend(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, rows, worn, restRows);
   paintMask(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, mask);
 }
@@ -614,8 +613,8 @@ export function paintPhoto(
   }
   paintSign(ctx, "Pictures", layout.x + layout.w * 0.5, Math.max(8, layout.y - layout.h * 0.01), layout.h, 0.85);
   if (!rows) return;
-  const friendScale = Math.max(1, Math.round((layout.h * 0.1035) / 16));
-  const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 68));
+  const friendScale = Math.max(1, Math.round((layout.h * 0.069) / 16));
+  const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 102));
   const eased = zoom * zoom * (3 - 2 * zoom);
   const scale = friendScale + (peak - friendScale) * eased;
   const homeX = layout.x + layout.w * 0.46;
@@ -656,3 +655,4 @@ export function paintPhoto(
   paintMask(ctx, -8 * shot, -8 * shot, shot, projection);
   ctx.restore();
 }
+

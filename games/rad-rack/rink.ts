@@ -1,8 +1,7 @@
 import type { Look } from "./looks";
 import { paintFriend, paintSign } from "./paint";
-import floorUrl from "./art/skate-grain.png";
-import boothUrl from "./art/rink-booth.png";
-import photoUrl from "./art/photo-booth.png";
+import floorUrl from "./art/skate-neon.jpg";
+import photoUrl from "./art/photo-neon.jpg";
 
 const INK = "#141018";
 const CREAM = "#f4ecdf";
@@ -236,7 +235,6 @@ function paintQuads(
   }
 }
 let floorImage: HTMLImageElement | null = null;
-let boothImage: HTMLImageElement | null = null;
 let photoImage: HTMLImageElement | null = null;
 
 function floorArt() {
@@ -247,14 +245,6 @@ function floorArt() {
   return floorImage && floorImage.complete && floorImage.naturalWidth > 0 ? floorImage : null;
 }
 
-function boothArt() {
-  if (!boothImage && typeof Image !== "undefined") {
-    boothImage = new Image();
-    boothImage.src = boothUrl;
-  }
-  return boothImage && boothImage.complete && boothImage.naturalWidth > 0 ? boothImage : null;
-}
-
 function photoArt() {
   if (!photoImage && typeof Image !== "undefined") {
     photoImage = new Image();
@@ -263,19 +253,11 @@ function photoArt() {
   return photoImage && photoImage.complete && photoImage.naturalWidth > 0 ? photoImage : null;
 }
 
-function boothRect(layout: { x: number; y: number; w: number; h: number }) {
-  const boothH = layout.h * 0.34;
-  const boothW = boothH * (218 / 424);
-  const baseX = layout.x + layout.w * 0.8;
-  const baseY = layout.y + layout.h * 0.38;
-  return { x: baseX - boothW / 2, y: baseY - boothH, w: boothW, h: boothH };
-}
-
 export function rinkBoothHit(width: number, height: number, x: number, y: number) {
   const layout = floorLayout(width, height);
-  const box = boothRect(layout);
-  const top = box.y - layout.h * 0.1;
-  return x >= box.x - 12 && x <= box.x + box.w + 12 && y >= top && y <= box.y + box.h;
+  const nx = (x - layout.x) / layout.w;
+  const ny = (y - layout.y) / layout.h;
+  return nx >= 0.64 && nx <= 0.86 && ny >= 0.0 && ny <= 0.42;
 }
 
 type Gear = "band" | "shades" | "warmers" | "phones" | "jacket";
@@ -302,7 +284,7 @@ const CROWD: readonly Skater[] = [
 ];
 
 function floorLayout(width: number, height: number) {
-  const aspect = 1340 / 880;
+  const aspect = 1500 / 1034;
   let w = width * 0.98;
   let h = w / aspect;
   if (h > height * 0.96) {
@@ -314,9 +296,9 @@ function floorLayout(width: number, height: number) {
 
 export function rinkSpot(angle: number, width: number, height: number, radius = 1) {
   const layout = floorLayout(width, height);
-  const cx = layout.x + layout.w * 0.44;
+  const cx = layout.x + layout.w * 0.5;
   const cy = layout.y + layout.h * 0.58;
-  const rx = layout.w * 0.2 * radius;
+  const rx = layout.w * 0.22 * radius;
   const ry = layout.h * 0.14 * radius;
   return {
     x: cx + Math.cos(angle) * rx,
@@ -414,15 +396,6 @@ export function paintRink(
     ctx.imageSmoothingEnabled = smoothing;
   }
   if (crack > 0) paintCrack(ctx, layout, crack);
-  const booth = boothArt();
-  if (booth) {
-    const box = boothRect(layout);
-    const smoothing = ctx.imageSmoothingEnabled;
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(booth, box.x, box.y, box.w, box.h);
-    ctx.imageSmoothingEnabled = smoothing;
-    paintSign(ctx, "Pictures", box.x + box.w / 2, box.y - layout.h * 0.075, layout.h, 0.55);
-  }
 
   const people = layout.h * 0.1;
   const scale = Math.max(2, Math.round(people / 8));
@@ -557,13 +530,16 @@ export function paintUnder(
 }
 
 function photoLayout(width: number, height: number) {
-  const aspect = 607 / 438;
-  let w = width * 0.92;
+  const aspect = 1500 / 1093;
+  let w = width * 0.96;
   let h = w / aspect;
-  if (h > height * 0.92) {
-    h = height * 0.92;
+  if (h > height * 0.96) {
+    h = height * 0.96;
     w = h * aspect;
   }
+  const zoom = 1.7;
+  w *= zoom;
+  h *= zoom;
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };
 }
 
@@ -590,12 +566,12 @@ export function paintPhoto(
   }
   paintSign(ctx, "Pictures", layout.x + layout.w * 0.5, Math.max(8, layout.y - layout.h * 0.01), layout.h, 0.85);
   if (!rows) return;
-  const friendScale = Math.max(2, Math.round((layout.h * 0.22) / 16));
-  const peak = Math.max(friendScale + 2, Math.round(Math.min(width, height) / 32));
+  const friendScale = Math.max(1, Math.round((layout.h * 0.11) / 16));
+  const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 64));
   const eased = zoom * zoom * (3 - 2 * zoom);
   const scale = friendScale + (peak - friendScale) * eased;
-  const homeX = layout.x + layout.w * 0.42;
-  const homeY = layout.y + layout.h * 0.78;
+  const homeX = layout.x + layout.w * 0.46;
+  const homeY = layout.y + layout.h * 0.62;
   const footX = homeX + (width / 2 - homeX) * eased;
   const footY = homeY + (height * 0.56 - homeY) * eased;
   if (eased > 0.04) {

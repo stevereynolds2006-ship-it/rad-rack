@@ -386,3 +386,57 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+.rad-arcade {
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  z-index: 6;
+  width: min(280px, 86%);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #141018;
+  border: 3px solid #f4ecdf;
+  box-shadow: 6px 6px 0 #111111;
+}
+
+.rad-arcade-title {
+  margin: 0;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rad-arcade-screen {
+  width: 100%;
+  height: auto;
+  background: #07060c;
+  image-rendering: pixelated;
+  touch-action: none;
+}
+
+.rad-arcade-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rad-trip {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: #140816;
+}
+
+.rad-trip canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}

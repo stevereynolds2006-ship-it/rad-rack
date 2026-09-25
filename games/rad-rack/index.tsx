@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import type { GameComponentProps } from "@rarefriends/friendsdk/runtime";
 import { formatGameAmount } from "@rarefriends/friendsdk/ui";
 import { maximumPrize, type GamePlay, type GameSnapshot } from "@rarefriends/friendsdk/game";
-import { createFriendReader, spriteFrame, type GenerationSprites, type SpriteFacing } from "@rarefriends/friendsdk/sprites";
+import { createFriendReader, spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
 import { LOOKS, chanceLabel } from "./looks";
-import { DANCE_MOVES, clubPoint, paintClub } from "./club";
+import { DANCE_MOVES, GLOVES, GYM_MS, arcadeCabinetHit, arcadePoint, clubPoint, gloveById, gymDeckHit, gymGearHit, gymPoint, paintClub, paintGym, weeklyRareGlove } from "./club";
+import { createGameplaySfx } from "./sfx";
+import { ArcadePlay, TripWorld } from "./arcade-play";
 import { TAPES, createClubMusic, type ClubMusic } from "./music";
 import { outfitZoom, paintStage, wardrobeHit, WARDROBE_CURTAIN } from "./paint";
 import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
@@ -29,7 +31,7 @@ const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 
 type Panel = "odds" | "reveal" | "desk" | null;
 
-type Room = "rack" | "club" | "rink" | "under" | "photo";
+type Room = "rack" | "club" | "rink" | "under" | "photo" | "gym";
 type SavedPhoto = { id: number; mask: number; worn: number[] };
 
 type Live = {
@@ -44,11 +46,19 @@ type Live = {
   aimLane: number | null;
   floor: { nx: number; ny: number };
   floorAim: { nx: number; ny: number } | null;
+  gymSpot: { nx: number; ny: number };
+  gymAim: { nx: number; ny: number } | null;
+  deck: "gym" | "arcade";
+  deckBlend: number;
+  wander: number;
   fitUntil: number;
   outfitUntil: number;
   maskUntil: number;
   shotMask: number;
   shotReady: number;
+  gymAct: "" | "lift" | "punch";
+  gymUntil: number;
+  glove: number;
   closet: number;
   speed: number;
   side: "left" | "right";
@@ -64,7 +74,7 @@ type Live = {
   lights: readonly boolean[];
   hold: number;
   latched: boolean;
-  cross: (way: "in" | "out" | "rink" | "photo", fromButton?: boolean) => void;
+  cross: (way: "in" | "out" | "rink" | "photo" | "gym", fromButton?: boolean) => void;
   cycleMove: () => void;
 };
 
@@ -94,13 +104,20 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [ownedMasks, setOwnedMasks] = useState<ReadonlySet<number>>(() => new Set([0]));
   const [mask, setMask] = useState(0);
   const [maskSpent, setMaskSpent] = useState(0n);
+  const [ownedGloves, setOwnedGloves] = useState<ReadonlySet<number>>(() => new Set([0]));
+  const [glove, setGlove] = useState(0);
+  const [gloveSpent, setGloveSpent] = useState(0n);
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
+  const [cabinet, setCabinet] = useState(false);
+  const [trip, setTrip] = useState(false);
+  const [venue, setVenue] = useState<"gym" | "arcade">("gym");
   const [laps, setLaps] = useState(0);
   const [lights, setLights] = useState<readonly boolean[]>([true, false, false]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const portraitRef = useRef<HTMLCanvasElement>(null);
   const sound = useRef<FriendSoundKit | null>(null);
+  const fx = useRef(createGameplaySfx());
   const music = useRef<ClubMusic | null>(null);
   const locked = useRef(false);
   const epoch = useRef(0);
@@ -114,16 +131,24 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     sprites: null,
     held: new Set(),
     lane: 0,
-    place: { nx: 0.46, ny: 0.68 },
+    place: { nx: 0.42, ny: 0.56 },
     aim: null,
     aimLane: null,
-    floor: { nx: 0.42, ny: 0.84 },
+    floor: { nx: 0.46, ny: 0.68 },
     floorAim: null,
+    gymSpot: { nx: 0.42, ny: 0.58 },
+    gymAim: null,
+    deck: "gym",
+    deckBlend: 0,
+    wander: 0,
     fitUntil: 0,
     outfitUntil: 0,
     maskUntil: 0,
     shotMask: -1,
     shotReady: 0,
+    gymAct: "",
+    gymUntil: 0,
+    glove: 0,
     closet: 0,
     speed: 0,
     side: "right",
@@ -151,6 +176,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   live.current.muted = muted;
   live.current.quad = equipped;
   live.current.mask = mask;
+  live.current.glove = glove;
   live.current.lights = lights;
 
   useEffect(() => {
@@ -186,12 +212,15 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setOwnedMasks(new Set([0]));
     setMask(0);
     setMaskSpent(0n);
+    setOwnedGloves(new Set([0]));
+    setGlove(0);
+    setGloveSpent(0n);
     setPhotos([]);
     setViewPhoto(null);
     locked.current = false;
     live.current.room = "rack";
     live.current.lane = 0;
-    live.current.place = { nx: 0.46, ny: 0.68 };
+    live.current.place = { nx: 0.42, ny: 0.56 };
     live.current.aim = null;
     live.current.aimLane = null;
     live.current.closet = 0;
@@ -230,11 +259,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setSpriteError("");
     setSpriteNote("");
     const cached = sampleFriendSprites(friendId);
-    setSprites(cached ?? null);
+    setSprites(cached && cached.tokenId === friendId ? cached : null);
     void createFriendReader()
       .read(friendId)
       .then((value) => {
-        if (alive) setSprites(value);
+        if (alive && value.tokenId === friendId) setSprites(value);
       })
       .catch((cause: unknown) => {
         if (!alive) return;
@@ -259,6 +288,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
   useEffect(() => {
     sound.current?.setMuted(muted);
+    fx.current.setMuted(muted);
   }, [muted]);
 
   useEffect(() => {
@@ -267,6 +297,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     if (!canvas || !context) return;
     let frame = 0;
     let previous = 0;
+    let stepAt = 0;
     const state = live.current;
     const probe = {
       getX: () => state.lane,
@@ -297,13 +328,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       if (state.room === "rink") {
         state.skate += dt * (state.reduced ? 0.45 : 1.15 + dir * 0.6);
         const turned = (state.skate - state.lapMark) / (Math.PI * 2);
-        const whole = Math.min(6, Math.max(0, Math.floor(turned)));
+        const whole = Math.min(3, Math.max(0, Math.floor(turned)));
         if (whole !== state.lapShown) {
           state.lapShown = whole;
           setLaps(whole);
         }
-        if (state.crack === 0 && turned >= 6) {
+        if (state.crack === 0 && turned >= 3) {
           state.crack = now;
+          fx.current.play("drop");
           setCaption("The floor cracked");
         }
         if (state.crack > 0 && now - state.crack > 1300) {
@@ -317,12 +349,12 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         if (dir !== 0) {
           state.aim = null;
           state.place.nx = Math.min(0.8, Math.max(0.16, state.place.nx + dir * 0.38 * dt));
-          state.place.ny = 0.68;
+          state.place.ny = 0.56;
         } else if (state.aim) {
           const dx = state.aim.nx - state.place.nx;
           const dy = state.aim.ny - state.place.ny;
           const dist = Math.hypot(dx, dy);
-          const step = Math.min(dist, 0.72 * dt);
+          const step = Math.min(dist, 0.32 * dt);
           if (dist > 0.001) {
             state.place.nx += (dx / dist) * step;
             state.place.ny += (dy / dist) * step;
@@ -341,40 +373,69 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         if (state.closet > 0 && now - state.closet > 420 && !state.latched) state.cross("in");
         if (!atCurtain && state.closet === 0) state.latched = false;
       } else if (state.room === "club") {
+        const spot = state.floor;
         if (dir !== 0 || vert !== 0) {
           state.floorAim = null;
-          state.floor.nx = Math.min(0.88, Math.max(0.12, state.floor.nx + dir * 0.48 * dt));
-          state.floor.ny = Math.min(0.92, Math.max(0.4, state.floor.ny + vert * 0.48 * dt));
+          spot.nx = Math.min(0.8, Math.max(0.18, spot.nx + dir * 0.2 * dt));
+          spot.ny = Math.min(0.78, Math.max(0.55, spot.ny + vert * 0.2 * dt));
           walking = true;
         } else if (state.floorAim) {
-          const dx = state.floorAim.nx - state.floor.nx;
-          const dy = state.floorAim.ny - state.floor.ny;
+          const dx = state.floorAim.nx - spot.nx;
+          const dy = state.floorAim.ny - spot.ny;
           const dist = Math.hypot(dx, dy);
-          const step = Math.min(dist, 0.7 * dt);
+          const step = Math.min(dist, 0.28 * dt);
           if (dist > 0.001) {
-            state.floor.nx += (dx / dist) * step;
-            state.floor.ny += (dy / dist) * step;
+            spot.nx += (dx / dist) * step;
+            spot.ny += (dy / dist) * step;
           }
-          if (dx < -0.01) state.side = "left";
-          if (dx > 0.01) state.side = "right";
+          if (Math.abs(dx) > 0.01) state.side = dx < 0 ? "left" : "right";
           walking = dist > 0.02;
-          if (Math.abs(dx) > Math.abs(dy)) state.side = dx < 0 ? "left" : "right";
-          if (dist < 0.02) state.floorAim = null;
+          if (dist < 0.03) state.floorAim = null;
+        }
+      } else if (state.room === "gym") {
+        const targetBlend = state.deck === "arcade" ? 1 : 0;
+        state.deckBlend += (targetBlend - state.deckBlend) * Math.min(1, dt * 3.2);
+        if (Math.abs(targetBlend - state.deckBlend) < 0.01) state.deckBlend = targetBlend;
+        const lifting = state.deck === "gym" && state.gymAct === "lift" && now < state.gymUntil;
+        const spot = state.gymSpot;
+        const aim = state.gymAim;
+        const onArcade = state.deck === "arcade";
+        const loop = [
+          { nx: 0.28, ny: 0.58 },
+          { nx: 0.62, ny: 0.62 },
+          { nx: 0.72, ny: 0.5 },
+          { nx: 0.4, ny: 0.48 },
+        ];
+        if (!lifting) {
+          const target = aim ?? (onArcade ? null : loop[state.wander % loop.length] ?? null);
+          if (dir !== 0 || vert !== 0) {
+            state.gymAim = null;
+            const nxLimit = onArcade ? [0.2, 0.82] : [0.18, 0.82];
+            const nyLimit = onArcade ? [0.72, 0.9] : [0.46, 0.66];
+            spot.nx = Math.min(nxLimit[1] ?? 0.86, Math.max(nxLimit[0] ?? 0.18, spot.nx + dir * 0.2 * dt));
+            spot.ny = Math.min(nyLimit[1] ?? 0.72, Math.max(nyLimit[0] ?? 0.46, spot.ny + vert * 0.2 * dt));
+            walking = true;
+          } else if (target && !state.reduced) {
+            const dx = target.nx - spot.nx;
+            const dy = target.ny - spot.ny;
+            const dist = Math.hypot(dx, dy);
+            const step = Math.min(dist, (aim ? 0.28 : 0.07) * dt);
+            if (dist > 0.001) {
+              spot.nx += (dx / dist) * step;
+              spot.ny += (dy / dist) * step;
+            }
+            if (Math.abs(dx) > 0.01) state.side = dx < 0 ? "left" : "right";
+            walking = dist > 0.02;
+            if (dist < 0.03) {
+              state.gymAim = null;
+              if (!aim) state.wander = (state.wander + 1) % loop.length;
+            }
+          }
         }
       }
       if (dir < 0) state.side = "left";
       if (dir > 0) state.side = "right";
-      const facing: SpriteFacing =
-        state.room === "rink"
-          ? rinkSpot(state.skate, width, height).facing
-          : state.room === "club"
-            ? walking && (dir !== 0 || (state.floorAim && Math.abs(state.floorAim.nx - state.floor.nx) > Math.abs(state.floorAim.ny - state.floor.ny)))
-              ? state.side
-              : "down"
-            : walking
-              ? state.side
-              : "down";
-      const frameIndex = state.reduced ? 0 : Math.floor(now / 110) % 8;
+      const frameIndex = state.reduced ? 0 : Math.floor(now / 240) % 8;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const pixelW = Math.floor(width * dpr);
       const pixelH = Math.floor(height * dpr);
@@ -385,32 +446,29 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
       context.imageSmoothingEnabled = false;
       const beat = music.current?.beat() ?? 0;
-      const restRows = state.sprites ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows : null;
+      if (walking && !state.muted && !state.reduced && now - stepAt > 420) {
+        stepAt = now;
+        fx.current.play(state.room === "rink" ? "skate" : "step");
+      }
+      const same = state.sprites && state.sprites.tokenId === friendId ? state.sprites : null;
+      const restRows = same ? spriteFrame(same, "down", false, 0, "right").frame.rows : null;
+      const friendRows = same
+        ? spriteFrame(same, "down", walking && !state.reduced, state.reduced ? 0 : frameIndex, "right").frame.rows
+        : null;
       if (state.room === "club") {
-        const friendRows = state.sprites
-          ? spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows
-          : null;
         paintClub(context, width, height, friendRows, state.worn, state.floor, state.move, beat, state.reduced, now, walking, restRows);
       } else if (state.room === "rink") {
-        const friendRows = state.sprites
-          ? spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows
-          : null;
         const crack = state.crack > 0 ? Math.min(1, (now - state.crack) / 1100) : 0;
         paintRink(context, width, height, friendRows, state.worn, state.skate, state.reduced, now, skateById(state.quad), now < state.fitUntil, crack, restRows);
       } else if (state.room === "under") {
-        const friendRows = state.sprites
-          ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows
-          : null;
         paintUnder(context, width, height, friendRows, state.worn, state.lights, restRows);
       } else if (state.room === "photo") {
-        const friendRows = state.sprites
-          ? spriteFrame(state.sprites, "down", false, 0, state.side).frame.rows
-          : null;
         const shot = state.shotMask > 0 && now >= state.shotReady ? maskById(state.shotMask) : null;
         paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows);
-      } else if (state.sprites) {
-        const rows = spriteFrame(state.sprites, facing, walking, frameIndex, state.side).frame.rows;
-        paintStage(context, width, height, rows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil));
+      } else if (state.room === "gym") {
+        paintGym(context, width, height, friendRows, state.worn, state.gymAct, gloveById(state.glove), state.gymSpot, state.deck, state.deckBlend, now, state.gymUntil, state.reduced, restRows);
+      } else if (friendRows) {
+        paintStage(context, width, height, friendRows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil));
       } else {
         context.clearRect(0, 0, width, height);
       }
@@ -505,6 +563,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     live.current.quad = id;
     if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
     note(`${skate.name} bought`);
+    fx.current.play("buy");
   }
 
   function buyMask(id: number) {
@@ -527,16 +586,42 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setMask(id);
     live.current.mask = id;
     note(`${item.name} bought`);
+    fx.current.play("buy");
+  }
+
+  function buyGlove(id: number) {
+    const rare = weeklyRareGlove();
+    const item = id >= 300 ? rare : GLOVES[id];
+    if (!item || live.current.paused || live.current.room !== "gym") return;
+    if (id >= 300 && rare.id !== id) return;
+    if (ownedGloves.has(id)) {
+      setGlove(id);
+      live.current.glove = id;
+      note(`${item.name} on`);
+      return;
+    }
+    if (purse < item.price) {
+      note("Not enough RF for those gloves");
+      return;
+    }
+    setGloveSpent((spent) => spent + item.price);
+    setOwnedGloves((owned) => new Set(owned).add(id));
+    setGlove(id);
+    live.current.glove = id;
+    note(`${item.name} bought`);
+    fx.current.play("buy");
   }
 
   function unlock() {
     void sound.current?.unlock();
     music.current?.unlock();
+    fx.current.unlock();
     if (!heard.current && live.current.muted) {
       heard.current = true;
       live.current.muted = false;
       setMuted(false);
       music.current?.setMuted(false);
+      fx.current.setMuted(false);
       music.current?.start();
     }
   }
@@ -564,7 +649,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       state.latched = true;
       state.crack = 0;
       state.lapShown = 0;
-      state.place = { nx: 0.46, ny: 0.68 };
+      state.place = { nx: 0.42, ny: 0.56 };
       state.aim = null;
       setLaps(0);
       setRoom("rack");
@@ -577,7 +662,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     window.setTimeout(() => setCaption((current) => (current === text ? "" : current)), 1100);
   }
 
-  function cross(way: "in" | "out" | "rink" | "photo", fromButton = false) {
+  function cross(way: "in" | "out" | "rink" | "photo" | "gym", fromButton = false) {
     const state = live.current;
     if (state.paused) return;
     if (!fromButton && state.latched) return;
@@ -590,9 +675,19 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         note("The rink");
         return;
       }
+      if (state.room === "gym") {
+        state.room = "rack";
+        state.place = { nx: 0.42, ny: 0.56 };
+        state.aim = null;
+        setRoom("rack");
+        setCabinet(false);
+        setVenue("gym");
+        note("Back at the rack");
+        return;
+      }
       state.room = "rack";
       state.lane = 0;
-      state.place = { nx: 0.46, ny: 0.68 };
+      state.place = { nx: 0.42, ny: 0.56 };
       state.aim = null;
       state.aimLane = null;
       state.closet = 0;
@@ -607,6 +702,21 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       state.room = "photo";
       setRoom("photo");
       note("Photo booth");
+      fx.current.play("door");
+      return;
+    }
+    if (way === "gym") {
+      if (state.room !== "rack") return;
+      state.latched = true;
+      state.room = "gym";
+      state.deck = "gym";
+      state.deckBlend = 0;
+      state.gymSpot = { nx: 0.42, ny: 0.58 };
+      state.gymAim = null;
+      setRoom("gym");
+      setVenue("gym");
+      note("Click the gym or the arcade");
+      fx.current.play("door");
       return;
     }
     if (state.room !== "rack") return;
@@ -618,7 +728,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     state.latched = true;
     state.room = way === "rink" ? "rink" : "club";
     state.lane = 0;
-    state.place = { nx: 0.46, ny: 0.68 };
+    state.place = { nx: 0.42, ny: 0.56 };
     state.aim = null;
     state.closet = 0;
     state.hold = 0;
@@ -631,6 +741,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     setRoom(state.room);
     note(way === "rink" ? "The rink" : "The Floor");
+    fx.current.play("door");
     if (!state.muted) {
       music.current?.setMuted(false);
       music.current?.unlock();
@@ -705,6 +816,24 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
   }
 
+  async function playCabinet() {
+    if (live.current.room !== "gym" || live.current.deck !== "arcade") return;
+    if (!snapshot || snapshot.consumables < 1n) {
+      note("1 token to play");
+      return;
+    }
+    await act(async () => {
+      const current = await client.read();
+      const pending = current.plays.find((play) => play.outcomeId === null);
+      const play = pending ?? (await client.play(1n))[0];
+      if (!play) throw new Error("No token for the arcade.");
+      await client.settle(play.id);
+      setCabinet(true);
+      fx.current.play("serve");
+      note("Rad Break");
+    });
+  }
+
   async function changeTape() {
     if (!snapshot || snapshot.consumables < 1n) {
       note("Need a mall token");
@@ -738,7 +867,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const definition = client.definition;
   const price = definition.price;
   const maxPrize = maximumPrize(definition);
-  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent ? snapshot.rfBalance - skateSpent - maskSpent : 0n) : 0n;
+  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent : 0n) : 0n;
   const afford = snapshot ? purse >= price : false;
   const backed = snapshot ? snapshot.freeStake >= maxPrize && snapshot.freeStake + price >= maxPrize : false;
   const wornNames = wornLooks.map((look) => look.name).join(", ");
@@ -749,7 +878,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       className="rad"
       data-motion={reduced ? "off" : "on"}
       data-room={room}
-      aria-label={room === "club" ? "The Floor dance room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
+      aria-label={room === "club" ? "The Floor dance room" : room === "gym" ? "Workout room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
       onPointerDown={unlock}
     >
       <header className="rad-top">
@@ -801,7 +930,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
               ? `The Floor. Friend ${friendId.toString()} wearing ${wornNames || "a look"}, move ${DANCE_MOVES[move] ?? "Bounce"}. Tap anywhere on the floor to walk there. ${trackTitle} is playing.`
               : room === "rink"
                 ? `Roller rink. Friend ${friendId.toString()} is skating with the crowd to ${trackTitle}. Back to the rack leaves the rink.`
-                : `Rare Friend ${friendId.toString()} wearing ${wornNames || "no 80s clothes yet"}. Tap the floor to walk. The Yours sign is the table. The curtain goes to the rink. The closet opens onto the dance floor.`
+                : `Rare Friend ${friendId.toString()} wearing ${wornNames || "no 80s clothes yet"}. Tap the floor to walk. The bag at the top opens the workout room. The curtain goes to the rink. The closet opens onto the dance floor.`
           }
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -830,12 +959,49 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 state.cross("rink");
                 return;
               }
+              if (hit === "gym") {
+                state.cross("gym", true);
+                return;
+              }
               if (hit) state.aim = hit;
             } else if (state.room === "club") {
               const spot = clubPoint(rect.width, rect.height, x, y);
               if (spot) state.floorAim = spot;
             } else if (state.room === "rink") {
               if (rinkBoothHit(rect.width, rect.height, x, y)) state.cross("photo", true);
+            } else if (state.room === "gym") {
+              const picked = gymDeckHit(rect.width, rect.height, x, y, state.deckBlend);
+              if (picked && picked !== state.deck) {
+                state.deck = picked;
+                state.gymAct = "";
+                state.gymUntil = 0;
+                state.gymAim = null;
+                state.gymSpot = picked === "arcade" ? { nx: 0.5, ny: 0.8 } : { nx: 0.42, ny: 0.58 };
+                if (picked !== "arcade") setCabinet(false);
+                setVenue(picked);
+                note(picked === "arcade" ? "Arcade" : "Gym");
+                return;
+              }
+              if (state.deck === "gym") {
+                const gear = gymGearHit(rect.width, rect.height, x, y, state.deckBlend);
+                if (gear) {
+                  state.gymAct = gear;
+                  state.gymUntil = performance.now() + GYM_MS;
+                  state.gymAim = null;
+                  fx.current.play("lift");
+                  note("Lift");
+                  return;
+                }
+                const spot = gymPoint(rect.width, rect.height, x, y, state.deckBlend);
+                if (spot) state.gymAim = spot;
+              } else {
+                if (arcadeCabinetHit(rect.width, rect.height, x, y, state.deckBlend)) {
+                  void playCabinet();
+                  return;
+                }
+                const spot = arcadePoint(rect.width, rect.height, x, y, state.deckBlend);
+                if (spot) state.gymAim = spot;
+              }
             } else if (state.room === "photo") {
               if (state.mask <= 0) {
                 note("Put a mask on first");
@@ -845,6 +1011,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
               state.maskUntil = ready;
               state.shotMask = state.mask;
               state.shotReady = ready;
+              fx.current.play("snap");
               setPhotos((list) => [
                 ...list,
                 { id: list.length + 1, mask: state.mask, worn: [...worn].sort((a, b) => a - b) },
@@ -885,6 +1052,25 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </button>
         {flash && <div className="rad-flash" aria-hidden="true" />}
         {caption && <p className={caption === "Cheese" ? "rad-caption rad-caption-right" : "rad-caption"}>{caption}</p>}
+        {cabinet ? (
+          <ArcadePlay
+            sfx={fx}
+            onClose={() => setCabinet(false)}
+            onDie={() => {
+              setCabinet(false);
+              setTrip(true);
+            }}
+          />
+        ) : null}
+        {trip ? (
+          <TripWorld
+            reduced={reduced}
+            onDone={() => {
+              setTrip(false);
+              fx.current.play("door");
+            }}
+          />
+        ) : null}
         {!sprites && (
           <div className="rad-loading" role={spriteError ? "alert" : "status"}>
             <p>{spriteError || "Pulling this Friend's pixels…"}</p>
@@ -904,16 +1090,18 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             ? "Waiting on the simulated counter…"
             : room === "club"
               ? muted
-                ? `Sound is off. Tap the room or Sound on to hear ${trackTitle}. Back to the rack leaves the floor.`
-                : `${trackTitle} is playing. Dance changes your move. Back to the rack leaves the floor.`
+                ? `Sound is off. Tap the floor to walk. Back to the rack leaves the floor.`
+                : `${trackTitle} is playing. Dance changes your move. Tap the floor to walk.`
               : room === "under"
-                ? "Under the mall. The lights cannot all go out. Spend 3 tokens to get back up."
+                ? "Under the mall. The lights cannot all go out. Buy a token, then spend 3 to get back up."
               : room === "photo"
                 ? "Photo booth. Put a mask on, then tap the room. The picture projects on the floor."
+              : room === "gym"
+                ? "Click the gym or the arcade. The middle machines cost 1 token."
               : room === "rink"
-                ? `${trackTitle} on the rink. Lap ${laps} of 6. The booth up on the right is the photo booth.`
+                ? `${trackTitle} on the rink. Lap ${laps} of 3. The booth up on the right is the photo booth.`
                 : worn.size > 0
-                  ? "Clothes on. Right door is the club. Left door is the rink."
+                  ? "Clothes on. The bag at the top is the workout room. Right door is the club. Left door is the rink."
                   : "Try a look on, or tap the table to see what you own. The club stays shut until your Friend is dressed.")}
       </p>
 
@@ -931,6 +1119,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
       {room === "under" ? (
         <div className="rad-actions">
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
           <button type="button" className="rad-primary" disabled={paused || busy || !snapshot || snapshot.consumables < 3n} onClick={buyOut}>
             Leave · 3 tokens
           </button>
@@ -994,6 +1190,46 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </div>
       ) : null}
 
+      {room === "gym" ? (
+        <div className="rad-rack" aria-label="Workout gloves">
+          {[...GLOVES.map((item, id) => ({ item, id, rare: false })), { item: weeklyRareGlove(), id: weeklyRareGlove().id, rare: true }].map(
+            ({ item, id, rare }) => {
+              const owned = ownedGloves.has(id);
+              const on = glove === id;
+              return (
+                <button key={id} type="button" className="rad-look" aria-pressed={on} disabled={paused} onClick={() => buyGlove(id)}>
+                  <span className="rad-swatch" style={{ background: item.swatch }} aria-hidden="true" />
+                  <span className="rad-look-name">{item.name}</span>
+                  <small>{on ? "Wearing" : owned ? "Use" : rare ? `Rare · ${rf(item.price)}` : `Buy · ${rf(item.price)}`}</small>
+                </button>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
+      {room === "gym" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>{venue === "arcade" ? "Arcade" : "Gym"}</strong>
+            <span>{venue === "arcade" ? "Click the gym or the arcade. 1 token plays a machine." : "Click the gym or the arcade."}</span>
+          </p>
+          {venue === "arcade" ? (
+            <button
+              type="button"
+              className="rad-primary"
+              disabled={!snapshot || !afford || !backed || busy || paused}
+              onClick={() => void act(() => client.buy(1n), "purchase")}
+            >
+              Buy token · {rf(price)}
+            </button>
+          ) : null}
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the rack
+          </button>
+        </div>
+      ) : null}
+
       {room === "club" || room === "rink" ? (
         <div className="rad-club-bar">
           <p className="rad-track">
@@ -1016,7 +1252,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             Back to the rack
           </button>
         </div>
-      ) : (
+      ) : room === "gym" || room === "photo" || room === "under" ? null : (
         <>
           <div className="rad-rack" aria-label="80s clothes">
             {LOOKS.map((look, index) => {
@@ -1231,10 +1467,12 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
       <footer className="rad-foot">
         {room === "club"
-          ? `${trackTitle} is the soundtrack. One mall token changes the tape. A/D or arrows walk. Space or Dance changes the move. Back to the rack leaves the floor.`
+          ? `${trackTitle} is the soundtrack. One mall token changes the tape. Tap the floor to walk.`
+          : room === "gym"
+            ? "Click the gym or the arcade. Weights lift. A middle machine costs 1 token."
           : room === "rink"
             ? `${trackTitle} is playing. One mall token changes the tape. Back to the rack leaves the rink.`
-            : "Left door is the roller rink. Right door is the club once you're dressed. One mall token changes the music."}
+            : "The bag at the top is the workout room. Left door is the roller rink. Right door is the club once you're dressed."}
         {room === "rack" && !backed && snapshot ? " Open a token before buying another — the preview reserve is full." : ""}
         {room === "rack" && !afford && snapshot ? " Not enough simulated RF." : ""}
       </footer>

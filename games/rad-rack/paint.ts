@@ -1,7 +1,7 @@
 import type { Look, LookPixel } from "./looks";
 import doorClosedUrl from "./art/door-closed.png";
 import doorOpenUrl from "./art/door-open.png";
-import wardrobeUrl from "./art/wardrobe-color.png";
+import wardrobeUrl from "./art/rack-neon.jpg";
 
 let wardrobeImage: HTMLImageElement | null = null;
 
@@ -13,26 +13,28 @@ function wardrobeArt() {
   return wardrobeImage && wardrobeImage.complete && wardrobeImage.naturalWidth > 0 ? wardrobeImage : null;
 }
 
-export const WARDROBE_CLOSET = { x: 0.54, y: 0.0, w: 0.3, h: 0.48 };
-export const WARDROBE_CURTAIN = { x: 0.12, y: 0.05, w: 0.22, h: 0.36 };
-export const WARDROBE_DESK = { x: 0.42, y: 0.72, w: 0.18, h: 0.16 };
+export const WARDROBE_CLOSET = { x: 0.5, y: 0.14, w: 0.28, h: 0.42 };
+export const WARDROBE_CURTAIN = { x: 0.06, y: 0.26, w: 0.2, h: 0.26 };
+export const WARDROBE_DESK = { x: 0.34, y: 0.62, w: 0.16, h: 0.16 };
+export const WARDROBE_BAG = { x: 0.3, y: 0.13, w: 0.2, h: 0.36 };
 
 export function wardrobeHit(
   width: number,
   height: number,
   x: number,
   y: number,
-): "closet" | "curtain" | "desk" | { nx: number; ny: number } | null {
+): "closet" | "curtain" | "desk" | "gym" | { nx: number; ny: number } | null {
   const layout = wardrobeLayout(width, height);
   const nx = (x - layout.x) / layout.w;
   const ny = (y - layout.y) / layout.h;
   if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null;
+  if (inside(WARDROBE_BAG, nx, ny)) return "gym";
   if (inside(WARDROBE_CLOSET, nx, ny)) return "closet";
   if (inside(WARDROBE_CURTAIN, nx, ny)) return "curtain";
   if (inside(WARDROBE_DESK, nx, ny)) return "desk";
   return {
-    nx: Math.min(0.78, Math.max(0.18, nx)),
-    ny: Math.min(0.82, Math.max(0.56, ny)),
+    nx: Math.min(0.82, Math.max(0.16, nx)),
+    ny: Math.min(0.66, Math.max(0.44, ny)),
   };
 }
 
@@ -41,13 +43,16 @@ function inside(zone: { x: number; y: number; w: number; h: number }, nx: number
 }
 
 function wardrobeLayout(width: number, height: number) {
-  const aspect = 1420 / 1140;
+  const aspect = 1500 / 1861;
   let w = width * 0.98;
   let h = w / aspect;
   if (h > height * 0.96) {
     h = height * 0.96;
     w = h * aspect;
   }
+  const zoom = 1.42;
+  w *= zoom;
+  h *= zoom;
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };
 }
 let doorClosed: HTMLImageElement | null = null;
@@ -519,10 +524,7 @@ export function paintStage(
     ctx.drawImage(art, layout.x, layout.y, layout.w, layout.h);
     ctx.imageSmoothingEnabled = smoothing;
   }
-  paintSign(ctx, "Rink", layout.x + layout.w * 0.22, layout.y + layout.h * 0.05, layout.h);
-  paintSign(ctx, "Dance", layout.x + layout.w * 0.68, layout.y + layout.h * -0.02, layout.h);
-  paintSign(ctx, "Yours", layout.x + layout.w * 0.52, layout.y + layout.h * 0.82, layout.h, 0.62);
-  const friendScale = Math.max(2, Math.round((layout.h * 0.16) / 16));
+  const friendScale = Math.max(2, Math.round((layout.h * 0.11) / 16));
   const bob = walking && !reducedMotion && zoom <= 0 ? Math.round(Math.sin(time / 140) * friendScale * 0.6) : 0;
   const big = Math.max(friendScale + 2, Math.round(Math.min(width, height) / 32));
   const eased = zoom * zoom * (3 - 2 * zoom);
@@ -543,7 +545,7 @@ export function paintStage(
 }
 
 export function paintSign(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, roomH: number, scale = 1) {
-  const fontSize = Math.max(11, Math.round(roomH * 0.055 * scale));
+  const fontSize = Math.max(9, Math.round(roomH * 0.046 * scale));
   ctx.save();
   ctx.imageSmoothingEnabled = true;
   ctx.font = `400 ${fontSize}px "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif`;

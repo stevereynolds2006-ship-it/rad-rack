@@ -188,6 +188,17 @@
   scroll-snap-type: x proximity;
 }
 
+.rad-rack-looks .rad-look {
+  width: 88px;
+  min-height: 0;
+  padding: 6px;
+  gap: 2px;
+}
+
+.rad-rack-looks .rad-look-name {
+  font-size: 11px;
+}
+
 .rad-look {
   flex: 0 0 auto;
   width: 124px;

@@ -66,7 +66,7 @@ function wardrobeLayout(width: number, height: number, fit = false) {
     h = height * 0.96;
     w = h * aspect;
   }
-  const zoom = fit ? 1 : 1.42;
+  const zoom = fit ? 1 : 1.12;
   w *= zoom;
   h *= zoom;
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };

@@ -1629,7 +1629,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </div>
       ) : room === "gym" || room === "photo" || room === "under" || room === "bowl" || room === "lane" || room === "snack" ? null : (
         <>
-          <div className="rad-rack" aria-label="80s clothes">
+          <div className="rad-rack rad-rack-looks" aria-label="80s clothes">
             {LOOKS.map((look, index) => {
               const owned = snapshot?.inventory[index] ?? 0n;
               const on = worn.has(index);

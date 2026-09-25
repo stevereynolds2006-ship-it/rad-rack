@@ -37,8 +37,9 @@ export function wardrobeHit(
   height: number,
   x: number,
   y: number,
+  fit = false,
 ): "closet" | "curtain" | "desk" | "gym" | "bowl" | { nx: number; ny: number } | null {
-  const layout = wardrobeLayout(width, height);
+  const layout = wardrobeLayout(width, height, fit);
   const nx = (x - layout.x) / layout.w;
   const ny = (y - layout.y) / layout.h;
   if (nx < 0 || ny < 0 || nx > 1 || ny > 1) return null;
@@ -57,7 +58,7 @@ function inside(zone: { x: number; y: number; w: number; h: number }, nx: number
   return nx >= zone.x && ny >= zone.y && nx <= zone.x + zone.w && ny <= zone.y + zone.h;
 }
 
-function wardrobeLayout(width: number, height: number) {
+function wardrobeLayout(width: number, height: number, fit = false) {
   const aspect = 1500 / 1861;
   let w = width * 0.98;
   let h = w / aspect;
@@ -65,7 +66,7 @@ function wardrobeLayout(width: number, height: number) {
     h = height * 0.96;
     w = h * aspect;
   }
-  const zoom = 1.42;
+  const zoom = fit ? 1 : 1.42;
   w *= zoom;
   h *= zoom;
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };
@@ -1061,8 +1062,9 @@ export function paintStage(
   time: number,
   restRows?: readonly string[] | null,
   zoom = 0,
+  fit = false,
 ) {
-  const layout = wardrobeLayout(width, height);
+  const layout = wardrobeLayout(width, height, fit);
   const art = wardrobeArt();
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);

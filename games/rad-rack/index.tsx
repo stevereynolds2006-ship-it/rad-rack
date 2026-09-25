@@ -14,6 +14,7 @@ import { TAPES, createClubMusic, type ClubMusic } from "./music";
 import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, bowlPoint, bowlSnackHit, lanePoint, outfitZoom, paintBowl, paintLane, paintSnack, paintStage, pinsForAim, wardrobeHit, weeklyRareBall, WARDROBE_CURTAIN, type BowlFrame } from "./paint";
 import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
 import { sampleFriendSprites } from "./samples";
+import infoTabUrl from "./art/info-tab.png";
 import "./style.css";
 
 declare global {
@@ -85,6 +86,7 @@ type Live = {
   lights: readonly boolean[];
   hold: number;
   latched: boolean;
+  info: boolean;
   cross: (way: "in" | "out" | "rink" | "photo" | "gym" | "bowl" | "lane" | "snack", fromButton?: boolean) => void;
   cycleMove: () => void;
 };
@@ -126,6 +128,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [bowlPaid, setBowlPaid] = useState(false);
   const [snackSpent, setSnackSpent] = useState(0n);
   const [snackId, setSnackId] = useState(-1);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
   const [cabinet, setCabinet] = useState(false);
@@ -133,6 +136,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [venue, setVenue] = useState<"gym" | "arcade">("gym");
   const [laps, setLaps] = useState(0);
   const [lights, setLights] = useState<readonly boolean[]>([true, false, false]);
+  useEffect(() => {
+    setInfoOpen(false);
+  }, [room]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const portraitRef = useRef<HTMLCanvasElement>(null);
   const sound = useRef<FriendSoundKit | null>(null);
@@ -194,6 +200,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     lights: [true, false, false],
     hold: 0,
     latched: false,
+    info: false,
     cross: () => {},
     cycleMove: () => {},
   });
@@ -209,6 +216,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   live.current.glove = glove;
   live.current.ball = ball;
   live.current.lights = lights;
+  live.current.info = infoOpen;
 
   useEffect(() => {
     music.current?.select(tape);
@@ -558,7 +566,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         const zoom = left <= 0 ? 0 : left > 400 ? 1 : left / 400;
         paintSnack(context, width, height, state.snackId >= 0 ? (SNACKS[state.snackId] ?? null) : null, zoom);
       } else if (friendRows) {
-        paintStage(context, width, height, friendRows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil));
+        paintStage(context, width, height, friendRows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil), !state.info);
       } else {
         context.clearRect(0, 0, width, height);
       }
@@ -1069,6 +1077,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       className="rad"
       data-motion={reduced ? "off" : "on"}
       data-room={room}
+      data-info={infoOpen ? "open" : "quiet"}
       aria-label={room === "club" ? "The Floor dance room" : room === "gym" ? "Workout room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
       onPointerDown={unlock}
     >
@@ -1132,7 +1141,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             const x = event.clientX - rect.left;
             const y = event.clientY - rect.top;
             if (state.room === "rack") {
-              const hit = wardrobeHit(rect.width, rect.height, x, y);
+              const hit = wardrobeHit(rect.width, rect.height, x, y, !state.info);
               if (hit === "desk") {
                 setPanel("desk");
                 return;
@@ -1636,7 +1645,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 >
                   <span className="rad-swatch" style={{ background: look.swatch }} aria-hidden="true" />
                   <span className="rad-look-name">{look.name}</span>
-                  <small>{on ? "Wearing" : owned > 0n ? `Owned ${owned.toString()}` : "Try on"}</small>
+                  {on || owned > 0n ? <small>{on ? "Wearing" : `Owned ${owned.toString()}`}</small> : null}
                 </button>
               );
             })}
@@ -1848,6 +1857,15 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         {room === "rack" && !backed && snapshot ? " Open a token before buying another — the preview reserve is full." : ""}
         {room === "rack" && !afford && snapshot ? " Not enough simulated RF." : ""}
       </footer>
+      <button
+        type="button"
+        className="rad-info-tab"
+        aria-expanded={infoOpen}
+        aria-label={infoOpen ? "Hide info" : "Info"}
+        onClick={() => setInfoOpen((open) => !open)}
+      >
+        <img src={infoTabUrl} alt="" />
+      </button>
     </section>
   );
 }

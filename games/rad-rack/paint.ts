@@ -524,9 +524,9 @@ export function paintStage(
     ctx.drawImage(art, layout.x, layout.y, layout.w, layout.h);
     ctx.imageSmoothingEnabled = smoothing;
   }
-  const friendScale = Math.max(2, Math.round((layout.h * 0.11) / 16));
+  const friendScale = Math.max(1, Math.round((layout.h * 0.069) / 16));
   const bob = walking && !reducedMotion && zoom <= 0 ? Math.round(Math.sin(time / 140) * friendScale * 0.6) : 0;
-  const big = Math.max(friendScale + 2, Math.round(Math.min(width, height) / 32));
+  const big = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 51));
   const eased = zoom * zoom * (3 - 2 * zoom);
   const scale = friendScale + (big - friendScale) * eased;
   const focusX = width / 2;

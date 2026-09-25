@@ -3,6 +3,7 @@ import { paintFriend, paintSign } from "./paint";
 import floorUrl from "./art/dance-neon.jpg";
 import gymUrl from "./art/gym-color-2.jpg";
 import arcadeUrl from "./art/arcade-neon-2.jpg";
+import arcadeFriendUrl from "./art/arcade-friend.png";
 
 const INK = "#141018";
 const CREAM = "#f4ecdf";
@@ -589,6 +590,65 @@ export function gymZoom(now: number, until: number) {
   return Math.max(0, 1 - (elapsed - 4400) / 500);
 }
 
+function paintArcadePlayer(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  shirt: string,
+  hair: string,
+  bob: number,
+) {
+  const art = arcadeFriendArt();
+  if (!art || typeof document === "undefined") return;
+  const height = Math.max(8, Math.round(scale * 8));
+  const width = Math.max(8, Math.round(height * (art.naturalWidth / art.naturalHeight)));
+  const scratch = arcadeScratch(width, height);
+  const g = scratch.getContext("2d");
+  if (!g) return;
+  g.clearRect(0, 0, width, height);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(art, 0, 0, width, height);
+  g.globalCompositeOperation = "source-atop";
+  g.fillStyle = hair;
+  g.fillRect(width * 0.18, height * 0.1, width * 0.64, Math.max(2, height * 0.045));
+  g.fillStyle = INK;
+  g.fillRect(width * 0.16, height * 0.3, width * 0.68, Math.max(2, height * 0.055));
+  g.fillStyle = CYAN;
+  g.fillRect(width * 0.2, height * 0.312, width * 0.16, Math.max(1, height * 0.028));
+  g.fillRect(width * 0.62, height * 0.312, width * 0.16, Math.max(1, height * 0.028));
+  g.fillStyle = shirt;
+  g.fillRect(0, height * 0.54, width, height * 0.24);
+  g.fillStyle = GOLD;
+  g.fillRect(width * 0.14, height * 0.86, width * 0.22, height * 0.1);
+  g.fillRect(width * 0.64, height * 0.86, width * 0.22, height * 0.1);
+  g.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fillRect(x - width * 0.28, y + bob, width * 0.56, Math.max(1, height * 0.025));
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(scratch, Math.round(x - width / 2), Math.round(y - height + bob));
+}
+
+let arcadeFriendImage: HTMLImageElement | null = null;
+let arcadeFriendScratch: HTMLCanvasElement | null = null;
+
+function arcadeFriendArt() {
+  if (!arcadeFriendImage && typeof Image !== "undefined") {
+    arcadeFriendImage = new Image();
+    arcadeFriendImage.src = arcadeFriendUrl;
+  }
+  return arcadeFriendImage && arcadeFriendImage.complete && arcadeFriendImage.naturalWidth > 0 ? arcadeFriendImage : null;
+}
+
+function arcadeScratch(width: number, height: number) {
+  if (!arcadeFriendScratch) arcadeFriendScratch = document.createElement("canvas");
+  if (arcadeFriendScratch.width !== width || arcadeFriendScratch.height !== height) {
+    arcadeFriendScratch.width = width;
+    arcadeFriendScratch.height = height;
+  }
+  return arcadeFriendScratch;
+}
+
 export function gymDeckHit(width: number, height: number, x: number, y: number, blend: number): "gym" | "arcade" | null {
   const decks = deckRects(width, height, blend);
   const onGym = inside(decks.gym, x, y);
@@ -685,14 +745,38 @@ export function paintGym(
   paintSign(ctx, "Gym", decks.gym.x + decks.gym.w / 2, Math.max(28, decks.gym.y + decks.gym.h * 0.04), decks.gym.h, 0.55);
   paintSign(ctx, "Arcade", decks.arcade.x + decks.arcade.w / 2, Math.max(28, decks.arcade.y + decks.arcade.h * 0.04), decks.arcade.h, 0.55);
   const layout = deck === "arcade" ? decks.arcade : decks.gym;
+  const crowdScale = Math.max(1, Math.round((decks.arcade.h * 0.143) / 10));
+  ctx.save();
+  ctx.globalAlpha = 0.45 + 0.55 * blend;
+  const players = [
+    { nx: 0.2, ny: 0.58, shirt: MAGENTA, hair: CYAN },
+    { nx: 0.32, ny: 0.48, shirt: GOLD, hair: INK },
+    { nx: 0.46, ny: 0.68, shirt: CYAN, hair: GOLD },
+    { nx: 0.62, ny: 0.5, shirt: "#7a3cff", hair: CREAM },
+    { nx: 0.74, ny: 0.58, shirt: "#ff7a1a", hair: MAGENTA },
+  ];
+  for (const player of players) {
+    const bob = reduced ? 0 : Math.round(Math.sin(now / 180 + player.nx * 12) * crowdScale * 0.35);
+    paintArcadePlayer(
+      ctx,
+      decks.arcade.x + player.nx * decks.arcade.w,
+      decks.arcade.y + player.ny * decks.arcade.h,
+      crowdScale,
+      player.shirt,
+      player.hair,
+      bob,
+    );
+  }
+  ctx.restore();
   const active = gear !== "" && now < until;
   const elapsed = active ? GYM_MS - (until - now) : 0;
   const cycle = active && !reduced ? (elapsed / 520) % 1 : 0;
   if (!rows) return;
-  const base = Math.max(2, Math.round((layout.h * 0.09) / 16));
+  const arcadeScale = deck === "arcade" ? 1.82 : 1;
+  const base = Math.max(1, Math.round((layout.h * 0.07 * arcadeScale) / 16));
   const zoom = reduced ? 0 : gymZoom(now, until);
   const eased = zoom * zoom * (3 - 2 * zoom);
-  const peak = Math.max(base + 2, Math.round(Math.min(width, height) / 28));
+  const peak = Math.max(base + 1, Math.round(Math.min(width, height) / (deck === "arcade" ? 20 : 36)));
   const scale = base + (peak - base) * eased;
   const lifting = active && gear === "lift";
   const press = lifting && !reduced ? (Math.sin(cycle * Math.PI * 2) + 1) / 2 : 0;

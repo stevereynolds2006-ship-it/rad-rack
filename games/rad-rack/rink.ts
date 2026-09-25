@@ -566,8 +566,8 @@ export function paintPhoto(
   }
   paintSign(ctx, "Pictures", layout.x + layout.w * 0.5, Math.max(8, layout.y - layout.h * 0.01), layout.h, 0.85);
   if (!rows) return;
-  const friendScale = Math.max(1, Math.round((layout.h * 0.11) / 16));
-  const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 64));
+  const friendScale = Math.max(1, Math.round((layout.h * 0.069) / 16));
+  const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 102));
   const eased = zoom * zoom * (3 - 2 * zoom);
   const scale = friendScale + (peak - friendScale) * eased;
   const homeX = layout.x + layout.w * 0.46;

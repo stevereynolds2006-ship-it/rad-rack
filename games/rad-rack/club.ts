@@ -511,7 +511,7 @@ export function paintClub(
       },
     }));
   if (rows) {
-    const friendScale = Math.max(1, Math.round(shelfH / 32));
+    const friendScale = Math.max(1, Math.round((shelfH / 32) * 1.5));
     layers.push({
       y: friendSpot.y + shift.y,
       draw: () => {
@@ -735,10 +735,10 @@ export function paintGym(
   const cycle = active && !reduced ? (elapsed / 520) % 1 : 0;
   if (!rows) return;
   const arcadeScale = deck === "arcade" ? 1.82 : 1;
-  const base = Math.max(1, Math.round((layout.h * 0.07 * arcadeScale) / 16));
+  const base = Math.max(1, Math.round((layout.h * 0.105 * arcadeScale) / 16));
   const zoom = reduced ? 0 : gymZoom(now, until);
   const eased = zoom * zoom * (3 - 2 * zoom);
-  const peak = Math.max(base + 1, Math.round(Math.min(width, height) / (deck === "arcade" ? 20 : 36)));
+  const peak = Math.max(base + 1, Math.round(Math.min(width, height) / (deck === "arcade" ? 13 : 24)));
   const scale = base + (peak - base) * eased;
   const lifting = active && gear === "lift";
   const press = lifting && !reduced ? (Math.sin(cycle * Math.PI * 2) + 1) / 2 : 0;

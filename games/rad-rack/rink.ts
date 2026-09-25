@@ -571,10 +571,15 @@ export function paintStudio(
   }
   if (!rows) return;
   const centerX = layout.x + layout.w * 0.613;
-  const centerY = layout.y + layout.h * 0.363;
-  const shot = Math.max(2, Math.round(layout.h * 0.33 / 16));
+  const centerY = layout.y + layout.h * 0.364;
+  const shot = Math.max(1, Math.round((layout.h * 0.33 / 16) * 0.375));
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.scale(1, 0.62);
+  ctx.translate(-centerX, -centerY);
   paintFriend(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, rows, worn, restRows);
   paintMask(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, mask);
+  ctx.restore();
 }
 
 function photoLayout(width: number, height: number) {

@@ -131,7 +131,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [snackSpent, setSnackSpent] = useState(0n);
   const [snackId, setSnackId] = useState(-1);
   const [burned, setBurned] = useState(0n);
-  const [tokensBurned, setTokensBurned] = useState(0n);
   const [lastBurn, setLastBurn] = useState("");
   const [statsOpen, setStatsOpen] = useState(false);
   const [ownedLooks, setOwnedLooks] = useState<ReadonlySet<number>>(() => new Set());
@@ -659,7 +658,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
   function burnToken(count: bigint) {
     if (count < 1n) return;
-    setTokensBurned((total) => total + count);
     const halves = count;
     const label = halves % 2n === 0n ? `${(halves / 2n).toString()} ${halves === 2n ? "token" : "tokens"}` : `${(halves / 2n).toString()}.5 ${halves === 1n ? "token" : "tokens"}`;
     setLastBurn(label);
@@ -1178,7 +1176,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           <div className="rad-meters">
             <span>{snapshot ? rf(purse) : "…"}</span>
             <span>Burned {rf(burned)}</span>
-            <span>Tokens burned {tokensBurned % 2n === 0n ? (tokensBurned / 2n).toString() : `${(tokensBurned / 2n).toString()}.5`}</span>
             {lastBurn ? <span>Spent {lastBurn}</span> : null}
             <span>{snapshot ? `${snapshot.consumables.toString()} ${snapshot.consumables === 1n ? "token" : "tokens"}` : ""}</span>
           </div>

@@ -6,7 +6,7 @@ import { formatGameAmount } from "@rarefriends/friendsdk/ui";
 import { maximumPrize, type GamePlay, type GameSnapshot } from "@rarefriends/friendsdk/game";
 import { createFriendReader, spriteFrame, type GenerationSprites } from "@rarefriends/friendsdk/sprites";
 import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "@rarefriends/friendsdk/sounds";
-import { LOOKS, chanceLabel } from "./looks";
+import { LOOKS, chanceLabel, lookById, weeklyRareLook } from "./looks";
 import { DANCE_MOVES, GLOVES, GYM_MS, arcadeCabinetHit, arcadePoint, clubPoint, gloveById, gymDeckHit, gymGearHit, gymPoint, paintClub, paintGym, weeklyRareGlove } from "./club";
 import { createGameplaySfx } from "./sfx";
 import { ArcadePlay, TripWorld } from "./arcade-play";
@@ -15,6 +15,7 @@ import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, 
 import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
 import { sampleFriendSprites } from "./samples";
 import infoTabUrl from "./art/info-tab.png";
+import topMarkUrl from "./art/top-mark.jpg";
 import "./style.css";
 
 declare global {
@@ -87,6 +88,7 @@ type Live = {
   hold: number;
   latched: boolean;
   info: boolean;
+  bought: boolean;
   cross: (way: "in" | "out" | "rink" | "photo" | "gym" | "bowl" | "lane" | "snack", fromButton?: boolean) => void;
   cycleMove: () => void;
 };
@@ -128,7 +130,13 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [bowlPaid, setBowlPaid] = useState(false);
   const [snackSpent, setSnackSpent] = useState(0n);
   const [snackId, setSnackId] = useState(-1);
-  const [infoOpen, setInfoOpen] = useState(false);
+  const [burned, setBurned] = useState(0n);
+  const [tokensBurned, setTokensBurned] = useState(0n);
+  const [lastBurn, setLastBurn] = useState("");
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [ownedLooks, setOwnedLooks] = useState<ReadonlySet<number>>(() => new Set());
+  const [lookSpent, setLookSpent] = useState(0n);
+  const [infoOpen, setInfoOpen] = useState(true);
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
   const [cabinet, setCabinet] = useState(false);
@@ -137,7 +145,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [laps, setLaps] = useState(0);
   const [lights, setLights] = useState<readonly boolean[]>([true, false, false]);
   useEffect(() => {
-    setInfoOpen(false);
+    setInfoOpen(true);
   }, [room]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const portraitRef = useRef<HTMLCanvasElement>(null);
@@ -147,8 +155,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const locked = useRef(false);
   const epoch = useRef(0);
   const heard = useRef(false);
+  const buyLookRef = useRef<(index: number) => void>(() => {});
   const reduced = motionOverride ?? motionPref;
-  const wornLooks = LOOKS.filter((_, index) => worn.has(index));
+  const wornLooks = [...worn].sort((a, b) => a - b).map((id) => lookById(id));
   const live = useRef<Live>({
     paused: false,
     reduced: false,
@@ -201,6 +210,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     hold: 0,
     latched: false,
     info: false,
+    bought: false,
     cross: () => {},
     cycleMove: () => {},
   });
@@ -230,7 +240,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const frame = spriteFrame(sprites, "down", false, 0, "right").frame.rows;
-    const looks = LOOKS.filter((_, index) => photo.worn.includes(index));
+    const looks = photo.worn.map((index) => lookById(index));
     paintPortrait(ctx, canvas.width, canvas.height, frame, looks, maskById(photo.mask));
   }, [viewPhoto, photos, sprites, panel]);
 
@@ -354,8 +364,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       let dir = 0;
       let vert = 0;
       if (!state.paused) {
-        if (held.has("KeyA") || held.has("ArrowLeft") || held.has("TouchLeft")) dir -= 1;
-        if (held.has("KeyD") || held.has("ArrowRight") || held.has("TouchRight")) dir += 1;
+        if (held.has("KeyA") || held.has("ArrowLeft")) dir -= 1;
+        if (held.has("KeyD") || held.has("ArrowRight")) dir += 1;
         if (held.has("KeyW") || held.has("ArrowUp")) vert -= 1;
         if (held.has("KeyS") || held.has("ArrowDown")) vert += 1;
       }
@@ -622,9 +632,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         if (live.current.room === "club") live.current.cycleMove();
         else pose();
       } else if (!event.repeat && key >= "1" && key <= "9") {
-        toggleWear(Number(key) - 1);
+        buyLookRef.current(Number(key) - 1);
       } else if (!event.repeat && key === "0") {
-        toggleWear(9);
+        buyLookRef.current(9);
       } else if (key === "p" && !event.repeat) {
         pose();
       }
@@ -639,6 +649,21 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       window.removeEventListener("keyup", up);
     };
   }, []);
+
+  function burnCoin(amount: bigint) {
+    if (amount < 2n) return;
+    const half = amount / 2n;
+    setBurned((total) => total + half);
+    setLastBurn(rf(half));
+  }
+
+  function burnToken(count: bigint) {
+    if (count < 1n) return;
+    setTokensBurned((total) => total + count);
+    const halves = count;
+    const label = halves % 2n === 0n ? `${(halves / 2n).toString()} ${halves === 2n ? "token" : "tokens"}` : `${(halves / 2n).toString()}.5 ${halves === 1n ? "token" : "tokens"}`;
+    setLastBurn(label);
+  }
 
   function buySkate(id: number, fromDesk = false) {
     const skate = skateById(id);
@@ -656,11 +681,12 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     setSkateSpent((spent) => spent + skate.price);
+    burnCoin(skate.price);
     setOwnedSkates((owned) => new Set(owned).add(id));
     setEquipped(id);
     live.current.quad = id;
     if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
-    note(`${skate.name} bought`);
+    note(`${skate.name} bought. Burned ${rf(skate.price / 2n)}`);
     fx.current.play("buy");
   }
 
@@ -680,10 +706,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     setMaskSpent((spent) => spent + item.price);
+    burnCoin(item.price);
     setOwnedMasks((owned) => new Set(owned).add(id));
     setMask(id);
     live.current.mask = id;
-    note(`${item.name} bought`);
+    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
     fx.current.play("buy");
   }
 
@@ -703,10 +730,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     setGloveSpent((spent) => spent + item.price);
+    burnCoin(item.price);
     setOwnedGloves((owned) => new Set(owned).add(id));
     setGlove(id);
     live.current.glove = id;
-    note(`${item.name} bought`);
+    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
     fx.current.play("buy");
   }
 
@@ -726,10 +754,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     setBallSpent((spent) => spent + item.price);
+    burnCoin(item.price);
     setOwnedBalls((owned) => new Set(owned).add(id));
     setBall(id);
     live.current.ball = id;
-    note(`${item.name} bought`);
+    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
     fx.current.play("buy");
   }
 
@@ -741,10 +770,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     setSnackSpent((spent) => spent + item.price);
+    burnCoin(item.price);
     setSnackId(id);
     live.current.snackId = id;
     live.current.snackUntil = performance.now() + 2000;
-    note(item.name);
+    note(`${item.name}. Burned ${rf(item.price / 2n)}`);
     fx.current.play("buy");
   }
 
@@ -780,6 +810,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     void act(async () => {
       const played = await client.play(3n);
       for (const play of played) await client.settle(play.id);
+      burnToken(3n);
       const state = live.current;
       state.room = "rack";
       state.latched = true;
@@ -789,7 +820,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       state.aim = null;
       setLaps(0);
       setRoom("rack");
-      note("Spent 3 tokens");
+      note("Burned 1.5 tokens");
     });
   }
 
@@ -857,6 +888,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     if (way === "gym") {
       if (state.room !== "rack") return;
+      if (!state.bought) {
+        note("Buy an item to leave");
+        return;
+      }
       state.latched = true;
       state.room = "gym";
       state.deck = "gym";
@@ -871,6 +906,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     if (way === "bowl") {
       if (state.room !== "rack") return;
+      if (!state.bought) {
+        note("Buy an item to leave");
+        return;
+      }
       state.latched = true;
       state.room = "bowl";
       setRoom("bowl");
@@ -897,6 +936,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return;
     }
     if (state.room !== "rack") return;
+    if (!state.bought) {
+      state.latched = true;
+      note("Buy an item to leave");
+      return;
+    }
     if (way === "in" && state.worn.length === 0) {
       state.latched = true;
       note("Put a look on first");
@@ -939,8 +983,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   live.current.cross = cross;
   live.current.cycleMove = cycleMove;
 
+  function ownsLook(index: number) {
+    if (ownedLooks.has(index)) return true;
+    return index < LOOKS.length && (snapshot?.inventory[index] ?? 0n) > 0n;
+  }
+
   function toggleWear(index: number) {
-    if ((live.current.paused && panel !== "desk") || index < 0 || index >= LOOKS.length) return;
+    if ((live.current.paused && panel !== "desk") || index < 0) return;
+    if (!ownsLook(index)) return;
     const puttingOn = !worn.has(index);
     setWorn((current) => {
       const next = new Set(current);
@@ -949,11 +999,35 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       return next;
     });
     if (puttingOn) {
-      live.current.worn = LOOKS.filter((_, look) => look === index || worn.has(look));
+      live.current.worn = [...worn].concat(index).sort((a, b) => a - b).map((id) => lookById(id));
       live.current.outfitUntil = performance.now() + 1800;
     }
     sound.current?.play("select");
   }
+
+  function buyLook(index: number) {
+    if (live.current.paused && panel !== "desk") return;
+    const rare = weeklyRareLook();
+    if (index >= 100 && rare.id !== index && !ownedLooks.has(index)) return;
+    const look = lookById(index);
+    if (ownsLook(index)) {
+      toggleWear(index);
+      return;
+    }
+    if (purse < look.price) {
+      note("Not enough RF for that outfit");
+      return;
+    }
+    setLookSpent((spent) => spent + look.price);
+    burnCoin(look.price);
+    setOwnedLooks((owned) => new Set(owned).add(index));
+    setWorn((current) => new Set(current).add(index));
+    live.current.worn = [...worn].concat(index).sort((a, b) => a - b).map((id) => lookById(id));
+    live.current.outfitUntil = performance.now() + 1800;
+    note(`${look.name} bought. Burned ${rf(look.price / 2n)}`);
+    fx.current.play("buy");
+  }
+  buyLookRef.current = buyLook;
 
   function pose() {
     if (live.current.paused) return;
@@ -1005,9 +1079,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       const play = pending ?? (await client.play(1n))[0];
       if (!play) throw new Error("No token for the arcade.");
       await client.settle(play.id);
+      burnToken(1n);
       setCabinet(true);
       fx.current.play("serve");
-      note("Rad Break");
+      note("Burned 0.5 token");
     });
   }
 
@@ -1026,9 +1101,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       const play = pending ?? (await client.play(1n))[0];
       if (!play) throw new Error("No token for bowling.");
       await client.settle(play.id);
+      burnToken(1n);
       live.current.bowlPaid = true;
       setBowlPaid(true);
-      note("Lane is open");
+      note("Burned 0.5 token");
       if (enter) live.current.cross("lane", true);
     });
   }
@@ -1046,31 +1122,31 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       const play = pending ?? (await client.play(1n))[0];
       if (!play) throw new Error("No token for the jukebox.");
       const settled = await client.settle(play.id);
+      burnToken(1n);
       setTape(next);
       const pulled = settled.outcomeId ? definition.outcomes[settled.outcomeId - 1]?.name : "";
-      note(pulled ? `${title}. Also pulled ${pulled}.` : title);
+      note(pulled ? `Burned 0.5 token. ${title}. Also pulled ${pulled}.` : `Burned 0.5 token. ${title}.`);
     });
-  }
-
-  function holdWalk(code: string, down: boolean) {
-    if (down) {
-      live.current.held.add(code);
-      unlock();
-      return;
-    }
-    live.current.held.delete(code);
-    if (code === "TouchRight" && live.current.room === "rack" && live.current.lane > 6.4) live.current.cross("in");
-    if (code === "TouchLeft" && live.current.room === "rack" && live.current.lane < -6.4) live.current.cross("rink");
   }
 
   const definition = client.definition;
   const price = definition.price;
   const maxPrize = maximumPrize(definition);
-  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent + ballSpent + snackSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent - ballSpent - snackSpent : 0n) : 0n;
+  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent + ballSpent + snackSpent + lookSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent - ballSpent - snackSpent - lookSpent : 0n) : 0n;
   const afford = snapshot ? purse >= price : false;
   const backed = snapshot ? snapshot.freeStake >= maxPrize && snapshot.freeStake + price >= maxPrize : false;
+  const hasBought = burned > 0n || ownedLooks.size > 0 || (snapshot?.inventory.some((count) => count > 0n) ?? false);
+  live.current.bought = hasBought;
   const wornNames = wornLooks.map((look) => look.name).join(", ");
   const trackTitle = TAPES[tape]?.title ?? "Cursor";
+
+  function buyCoin() {
+    void act(async () => {
+      await client.buy(1n);
+      burnCoin(price);
+      note(`Burned ${rf(price / 2n)}`);
+    }, "purchase");
+  }
 
   return (
     <section
@@ -1081,46 +1157,61 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       aria-label={room === "club" ? "The Floor dance room" : room === "gym" ? "Workout room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
       onPointerDown={unlock}
     >
-      <header className="rad-top">
-        <div className="rad-brand">
-          <p className="rad-mark">Rad Rack</p>
-          <p className="rad-friend">
-            {sprites ? `${sprites.familyName} #${friendId.toString()}` : `Friend #${friendId.toString()}`}
-          </p>
-        </div>
-        <div className="rad-meters">
-          <span>{snapshot ? rf(purse) : "…"}</span>
-          <span>{snapshot ? `${snapshot.consumables.toString()} ${snapshot.consumables === 1n ? "token" : "tokens"}` : ""}</span>
-        </div>
-        <div className="rad-tools">
-          <button
-            type="button"
-            aria-pressed={!muted}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => {
-              heard.current = true;
-              const next = !live.current.muted;
-              live.current.muted = next;
-              void sound.current?.unlock();
-              music.current?.setMuted(next);
-              if (!next) {
-                music.current?.unlock();
-                music.current?.start();
-              }
-              setMuted(next);
-            }}
-          >
-            {muted ? "Sound off" : "Sound on"}
-          </button>
-          <button
-            type="button"
-            aria-pressed={reduced}
-            onClick={() => setMotionOverride(!reduced)}
-          >
-            {reduced ? "Motion off" : "Motion on"}
-          </button>
-        </div>
-      </header>
+      <button
+        type="button"
+        className="rad-mark-btn"
+        aria-expanded={statsOpen}
+        aria-label={statsOpen ? "Hide details" : "Show details"}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={() => setStatsOpen((open) => !open)}
+      >
+        <img src={topMarkUrl} alt="" />
+      </button>
+      {statsOpen ? (
+        <header className="rad-top" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="rad-brand">
+            <p className="rad-mark">Rad Rack</p>
+            <p className="rad-friend">
+              {sprites ? `${sprites.familyName} #${friendId.toString()}` : `Friend #${friendId.toString()}`}
+            </p>
+          </div>
+          <div className="rad-meters">
+            <span>{snapshot ? rf(purse) : "…"}</span>
+            <span>Burned {rf(burned)}</span>
+            <span>Tokens burned {tokensBurned % 2n === 0n ? (tokensBurned / 2n).toString() : `${(tokensBurned / 2n).toString()}.5`}</span>
+            {lastBurn ? <span>Spent {lastBurn}</span> : null}
+            <span>{snapshot ? `${snapshot.consumables.toString()} ${snapshot.consumables === 1n ? "token" : "tokens"}` : ""}</span>
+          </div>
+          <div className="rad-tools">
+            <button
+              type="button"
+              aria-pressed={!muted}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => {
+                heard.current = true;
+                const next = !live.current.muted;
+                live.current.muted = next;
+                void sound.current?.unlock();
+                music.current?.setMuted(next);
+                if (!next) {
+                  music.current?.unlock();
+                  music.current?.start();
+                }
+                setMuted(next);
+              }}
+            >
+              {muted ? "Sound off" : "Sound on"}
+            </button>
+            <button
+              type="button"
+              aria-pressed={reduced}
+              onClick={() => setMotionOverride(!reduced)}
+            >
+              {reduced ? "Motion off" : "Motion on"}
+            </button>
+          </div>
+        </header>
+      ) : null}
 
       <div className="rad-stage">
         <canvas
@@ -1147,6 +1238,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 return;
               }
               if (hit === "closet") {
+                if (!state.bought) {
+                  note("Buy an item to leave");
+                  return;
+                }
                 if (state.worn.length === 0) {
                   note("Put a look on first");
                   return;
@@ -1256,32 +1351,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             }
           }}
         />
-        <button
-          type="button"
-          className="rad-walk rad-walk-left"
-          aria-label="Walk left"
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            holdWalk("TouchLeft", true);
-          }}
-          onPointerUp={() => holdWalk("TouchLeft", false)}
-          onPointerCancel={() => holdWalk("TouchLeft", false)}
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          className="rad-walk rad-walk-right"
-          aria-label="Walk right"
-          onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
-            holdWalk("TouchRight", true);
-          }}
-          onPointerUp={() => holdWalk("TouchRight", false)}
-          onPointerCancel={() => holdWalk("TouchRight", false)}
-        >
-          →
-        </button>
         {flash && <div className="rad-flash" aria-hidden="true" />}
         {caption && <p className={caption === "Cheese" ? "rad-caption rad-caption-right" : "rad-caption"}>{caption}</p>}
         {cabinet ? (
@@ -1338,7 +1407,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 ? "Snack bar. Tap a snack to buy it."
               : room === "rink"
                 ? `${trackTitle} on the rink. Lap ${laps} of 3. The booth up on the right is the photo booth.`
-                : worn.size > 0
+                : !hasBought
+                  ? "Buy an item to leave the rack."
+                  : worn.size > 0
                   ? "Clothes on. The bag at the top is the workout room. Right door is the club. Left door is the rink."
                   : "Try a look on, or tap the table to see what you own. The club stays shut until your Friend is dressed.")}
       </p>
@@ -1361,7 +1432,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1426,7 +1497,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1442,7 +1513,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1459,7 +1530,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1501,7 +1572,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1549,7 +1620,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1587,7 +1658,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1614,7 +1685,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             type="button"
             className="rad-primary"
             disabled={!snapshot || !afford || !backed || busy || paused}
-            onClick={() => void act(() => client.buy(1n), "purchase")}
+            onClick={buyCoin}
           >
             Buy token · {rf(price)}
           </button>
@@ -1630,22 +1701,25 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       ) : room === "gym" || room === "photo" || room === "under" || room === "bowl" || room === "lane" || room === "snack" ? null : (
         <>
           <div className="rad-rack rad-rack-looks" aria-label="80s clothes">
-            {LOOKS.map((look, index) => {
-              const owned = snapshot?.inventory[index] ?? 0n;
-              const on = worn.has(index);
+            {[
+              ...LOOKS.map((look, index) => ({ look: lookById(index), id: index, rare: false })),
+              { look: weeklyRareLook(), id: weeklyRareLook().id, rare: true },
+            ].map(({ look, id, rare }) => {
+              const owned = ownsLook(id);
+              const on = worn.has(id);
               return (
                 <button
-                  key={look.name}
+                  key={id}
                   type="button"
                   className="rad-look"
                   aria-pressed={on}
-                  data-owned={owned > 0n ? "yes" : "no"}
+                  data-owned={owned ? "yes" : "no"}
                   disabled={paused}
-                  onClick={() => toggleWear(index)}
+                  onClick={() => buyLook(id)}
                 >
                   <span className="rad-swatch" style={{ background: look.swatch }} aria-hidden="true" />
                   <span className="rad-look-name">{look.name}</span>
-                  {on || owned > 0n ? <small>{on ? "Wearing" : `Owned ${owned.toString()}`}</small> : null}
+                  <small>{on ? "Wearing" : owned ? "Owned" : rare ? `Rare · ${rf(look.price)}` : `Buy · ${rf(look.price)}`}</small>
                 </button>
               );
             })}
@@ -1655,19 +1729,20 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             <button
               type="button"
               className="rad-floor"
+              data-open={hasBought ? "yes" : "no"}
               disabled={paused}
               onClick={() => cross("rink", true)}
             >
-              The Rink
+              {hasBought ? "The Rink" : "The Rink locked"}
             </button>
             <button
               type="button"
               className="rad-floor"
-              data-open={worn.size > 0 ? "yes" : "no"}
+              data-open={hasBought && worn.size > 0 ? "yes" : "no"}
               disabled={paused}
               onClick={() => cross("in", true)}
             >
-              {worn.size > 0 ? "The Floor" : "The Floor locked"}
+              {hasBought && worn.size > 0 ? "The Floor" : "The Floor locked"}
             </button>
             <button
               type="button"
@@ -1680,7 +1755,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
               type="button"
               className="rad-primary"
               disabled={!snapshot || !afford || !backed || busy || paused}
-              onClick={() => void act(() => client.buy(1n), "purchase")}
+              onClick={buyCoin}
             >
               Buy token · {rf(price)}
             </button>
@@ -1694,6 +1769,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                   const play = pending ?? (await client.play(1n))[0];
                   if (!play) throw new Error("No mall token to open.");
                   const settled: GamePlay = await client.settle(play.id);
+                  burnToken(1n);
+                  note("Burned 0.5 token");
                   if (!settled.outcomeId) return;
                   const index = settled.outcomeId - 1;
                   const bps = definition.outcomes[index]?.chanceBps ?? 10_000;
@@ -1783,25 +1860,24 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                       </li>
                     );
                   })}
-                  {LOOKS.map((look, index) => {
-                    const count = snapshot?.inventory[index] ?? 0n;
-                    if (count < 1n) return null;
-                    const on = worn.has(index);
+                  {Array.from(new Set([...ownedLooks, ...LOOKS.map((_, index) => ((snapshot?.inventory[index] ?? 0n) > 0n ? index : -1)).filter((id) => id >= 0)])).sort((a, b) => a - b).map((id) => {
+                    const look = lookById(id);
+                    const on = worn.has(id);
                     return (
-                      <li key={look.name}>
+                      <li key={id}>
                         <div>
                           <strong>{look.name}</strong>
-                          <small>Look · owned {count.toString()}{on ? " · wearing" : ""}</small>
+                          <small>{id >= 100 ? "Rare outfit" : "Look"}{on ? " · wearing" : ""}</small>
                         </div>
-                        <button type="button" onClick={() => toggleWear(index)}>
+                        <button type="button" onClick={() => toggleWear(id)}>
                           {on ? "Take off" : "Wear"}
                         </button>
                       </li>
                     );
                   })}
                 </ul>
-                {(snapshot?.inventory.every((count) => count < 1n) ?? true) && photos.length === 0 ? (
-                  <p>No looks yet. Open a mall token at the rack.</p>
+                {(snapshot?.inventory.every((count) => count < 1n) ?? true) && photos.length === 0 && ownedLooks.size === 0 && ownedSkates.size === 0 ? (
+                  <p>No looks yet. Buy one at the rack.</p>
                 ) : null}
                 </>
                 )}
@@ -1853,7 +1929,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             ? "Tap a snack to buy it. Back to the alley leaves the counter."
           : room === "rink"
             ? `${trackTitle} is playing. One mall token changes the tape. Back to the rack leaves the rink.`
-            : "The bag at the top is the workout room. Left door is the roller rink. Right door is the club once you're dressed."}
+            : room === "rack" && !hasBought
+              ? "Buy an item to leave the rack."
+              : "The bag at the top is the workout room. Left door is the roller rink. Right door is the club once you're dressed."}
         {room === "rack" && !backed && snapshot ? " Open a token before buying another — the preview reserve is full." : ""}
         {room === "rack" && !afford && snapshot ? " Not enough simulated RF." : ""}
       </footer>

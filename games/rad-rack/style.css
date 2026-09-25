@@ -41,12 +41,48 @@
   outline-offset: 2px;
 }
 
+.rad-mark-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 7;
+  width: 56px;
+  height: 56px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: #000000;
+}
+
+.rad-mark-btn img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.rad[data-motion="on"] .rad-mark-btn {
+  animation: rad-mark-bob 1.4s ease-in-out infinite;
+}
+
+@keyframes rad-mark-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
+
 .rad-top {
+  position: absolute;
+  top: 70px;
+  right: 8px;
+  z-index: 7;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  padding: 10px 12px 6px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(280px, calc(100% - 16px));
+  padding: 10px;
+  background: #141018ee;
+  border: 2px solid #f4ecdf;
 }
 
 .rad-brand {
@@ -113,23 +149,6 @@
   height: 100%;
   display: block;
 }
-
-.rad-walk {
-  position: absolute;
-  top: auto;
-  bottom: 10px;
-  width: 52px;
-  height: 48px;
-  padding: 0;
-  font-size: 22px;
-  background: #f4ecdf;
-  color: var(--ink);
-  border-color: var(--magenta);
-  z-index: 2;
-}
-
-.rad-walk-left { left: 8px; }
-.rad-walk-right { right: 8px; }
 
 .rad-flash {
   position: absolute;
@@ -342,6 +361,7 @@
 @media (prefers-reduced-motion: reduce) {
   .rad-stage { animation: none; }
   .rad-flash { animation: none; opacity: 0; }
+  .rad-mark-btn { animation: none; }
 }
 
 .rad[data-room="club"] .rad-stage,

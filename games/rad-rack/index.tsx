@@ -11,8 +11,8 @@ import { DANCE_MOVES, GLOVES, GYM_MS, arcadeCabinetHit, arcadePoint, clubPoint, 
 import { createGameplaySfx } from "./sfx";
 import { ArcadePlay, TripWorld } from "./arcade-play";
 import { TAPES, createClubMusic, type ClubMusic } from "./music";
-import { outfitZoom, paintStage, wardrobeHit, WARDROBE_CURTAIN } from "./paint";
-import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
+import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, bowlPoint, bowlSnackHit, lanePoint, outfitZoom, paintBowl, paintLane, paintSnack, paintStage, pinsForAim, wardrobeHit, weeklyRareBall, WARDROBE_CURTAIN, type BowlFrame } from "./paint";
+import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
 import { sampleFriendSprites } from "./samples";
 import "./style.css";
 
@@ -31,7 +31,7 @@ const rf = (value: bigint) => `${formatGameAmount(value, 18)} RF`;
 
 type Panel = "odds" | "reveal" | "desk" | null;
 
-type Room = "rack" | "club" | "rink" | "under" | "photo" | "gym";
+type Room = "rack" | "club" | "rink" | "under" | "photo" | "gym" | "bowl" | "lane" | "snack";
 type SavedPhoto = { id: number; mask: number; worn: number[] };
 
 type Live = {
@@ -48,6 +48,8 @@ type Live = {
   floorAim: { nx: number; ny: number } | null;
   gymSpot: { nx: number; ny: number };
   gymAim: { nx: number; ny: number } | null;
+  bowlSpot: { nx: number; ny: number };
+  bowlAim: { nx: number; ny: number } | null;
   deck: "gym" | "arcade";
   deckBlend: number;
   wander: number;
@@ -56,9 +58,18 @@ type Live = {
   maskUntil: number;
   shotMask: number;
   shotReady: number;
+  boothUntil: number;
   gymAct: "" | "lift" | "punch";
   gymUntil: number;
   glove: number;
+  ball: number;
+  rollStart: number;
+  rollAim: number;
+  rollHit: boolean;
+  frames: BowlFrame[];
+  bowlPaid: boolean;
+  snackUntil: number;
+  snackId: number;
   closet: number;
   speed: number;
   side: "left" | "right";
@@ -74,7 +85,7 @@ type Live = {
   lights: readonly boolean[];
   hold: number;
   latched: boolean;
-  cross: (way: "in" | "out" | "rink" | "photo" | "gym", fromButton?: boolean) => void;
+  cross: (way: "in" | "out" | "rink" | "photo" | "gym" | "bowl" | "lane" | "snack", fromButton?: boolean) => void;
   cycleMove: () => void;
 };
 
@@ -103,10 +114,18 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [skateSpent, setSkateSpent] = useState(0n);
   const [ownedMasks, setOwnedMasks] = useState<ReadonlySet<number>>(() => new Set([0]));
   const [mask, setMask] = useState(0);
+  const [studio, setStudio] = useState(false);
   const [maskSpent, setMaskSpent] = useState(0n);
   const [ownedGloves, setOwnedGloves] = useState<ReadonlySet<number>>(() => new Set([0]));
   const [glove, setGlove] = useState(0);
   const [gloveSpent, setGloveSpent] = useState(0n);
+  const [ownedBalls, setOwnedBalls] = useState<ReadonlySet<number>>(() => new Set([0]));
+  const [ball, setBall] = useState(0);
+  const [ballSpent, setBallSpent] = useState(0n);
+  const [bowlFrames, setBowlFrames] = useState<BowlFrame[]>([]);
+  const [bowlPaid, setBowlPaid] = useState(false);
+  const [snackSpent, setSnackSpent] = useState(0n);
+  const [snackId, setSnackId] = useState(-1);
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
   const [cabinet, setCabinet] = useState(false);
@@ -138,6 +157,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     floorAim: null,
     gymSpot: { nx: 0.42, ny: 0.58 },
     gymAim: null,
+    bowlSpot: { nx: 0.36, ny: 0.64 },
+    bowlAim: null,
     deck: "gym",
     deckBlend: 0,
     wander: 0,
@@ -146,9 +167,18 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     maskUntil: 0,
     shotMask: -1,
     shotReady: 0,
+    boothUntil: 0,
     gymAct: "",
     gymUntil: 0,
     glove: 0,
+    ball: 0,
+    rollStart: 0,
+    rollAim: 0,
+    rollHit: false,
+    frames: [],
+    bowlPaid: false,
+    snackUntil: 0,
+    snackId: -1,
     closet: 0,
     speed: 0,
     side: "right",
@@ -177,6 +207,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   live.current.quad = equipped;
   live.current.mask = mask;
   live.current.glove = glove;
+  live.current.ball = ball;
   live.current.lights = lights;
 
   useEffect(() => {
@@ -392,6 +423,32 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           walking = dist > 0.02;
           if (dist < 0.03) state.floorAim = null;
         }
+      } else if (state.room === "bowl") {
+        const spot = state.bowlSpot;
+        if (dir !== 0 || vert !== 0) {
+          state.bowlAim = null;
+          spot.nx = Math.min(0.72, Math.max(0.2, spot.nx + dir * 0.2 * dt));
+          spot.ny = Math.min(0.72, Math.max(0.54, spot.ny + vert * 0.2 * dt));
+          walking = true;
+        } else if (state.bowlAim) {
+          if (state.reduced) {
+            spot.nx = state.bowlAim.nx;
+            spot.ny = state.bowlAim.ny;
+            state.bowlAim = null;
+          } else {
+          const dx = state.bowlAim.nx - spot.nx;
+          const dy = state.bowlAim.ny - spot.ny;
+          const dist = Math.hypot(dx, dy);
+          const step = Math.min(dist, 0.28 * dt);
+          if (dist > 0.001) {
+            spot.nx += (dx / dist) * step;
+            spot.ny += (dy / dist) * step;
+          }
+          if (Math.abs(dx) > 0.01) state.side = dx < 0 ? "left" : "right";
+          walking = dist > 0.02;
+          if (dist < 0.03) state.bowlAim = null;
+          }
+        }
       } else if (state.room === "gym") {
         const targetBlend = state.deck === "arcade" ? 1 : 0;
         state.deckBlend += (targetBlend - state.deckBlend) * Math.min(1, dt * 3.2);
@@ -410,8 +467,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           const target = aim ?? (onArcade ? null : loop[state.wander % loop.length] ?? null);
           if (dir !== 0 || vert !== 0) {
             state.gymAim = null;
-            const nxLimit = onArcade ? [0.2, 0.82] : [0.18, 0.82];
-            const nyLimit = onArcade ? [0.72, 0.9] : [0.46, 0.66];
+            const nxLimit = onArcade ? [0.16, 0.84] : [0.18, 0.82];
+            const nyLimit = onArcade ? [0.42, 0.88] : [0.46, 0.66];
             spot.nx = Math.min(nxLimit[1] ?? 0.86, Math.max(nxLimit[0] ?? 0.18, spot.nx + dir * 0.2 * dt));
             spot.ny = Math.min(nyLimit[1] ?? 0.72, Math.max(nyLimit[0] ?? 0.46, spot.ny + vert * 0.2 * dt));
             walking = true;
@@ -463,10 +520,43 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       } else if (state.room === "under") {
         paintUnder(context, width, height, friendRows, state.worn, state.lights, restRows);
       } else if (state.room === "photo") {
-        const shot = state.shotMask > 0 && now >= state.shotReady ? maskById(state.shotMask) : null;
-        paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows);
+        if (state.boothUntil > 0 && now >= state.boothUntil) {
+          state.boothUntil = 0;
+          state.cross("out", true);
+        } else if (state.boothUntil > now) {
+          const shot = maskById(state.shotMask);
+          paintStudio(context, width, height, restRows ?? friendRows, state.worn, shot, restRows);
+        } else {
+          const shot = state.shotMask > 0 && now >= state.shotReady ? maskById(state.shotMask) : null;
+          paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows);
+        }
       } else if (state.room === "gym") {
         paintGym(context, width, height, friendRows, state.worn, state.gymAct, gloveById(state.glove), state.gymSpot, state.deck, state.deckBlend, now, state.gymUntil, state.reduced, restRows);
+      } else if (state.room === "bowl") {
+        paintBowl(context, width, height, friendRows, state.worn, state.bowlSpot, restRows);
+      } else if (state.room === "lane") {
+        const roll = state.rollStart > 0 ? Math.min(1, (now - state.rollStart) / 900) : 0;
+        if (state.rollStart > 0 && !state.rollHit && now - state.rollStart >= 860) {
+          state.rollHit = true;
+          fx.current.play("hit");
+          const knocked = pinsForAim(state.rollAim);
+          const finished = bowlDone(state.frames);
+          state.frames = addBowlRoll(state.frames, knocked);
+          if (!finished && bowlDone(state.frames)) {
+            state.bowlPaid = false;
+            setBowlPaid(false);
+          }
+          setBowlFrames(state.frames);
+          const text = knocked === 10 ? "Strike" : knocked === 0 ? "Gutter" : `${knocked} pins`;
+          setCaption(text);
+          window.setTimeout(() => setCaption((current) => (current === text ? "" : current)), 1400);
+        }
+        const reveal = state.rollStart > 0 ? now - state.rollStart : 0;
+        paintLane(context, width, height, friendRows, state.worn, ballById(state.ball), roll, state.rollAim, state.frames, reveal, restRows);
+      } else if (state.room === "snack") {
+        const left = state.snackUntil - now;
+        const zoom = left <= 0 ? 0 : left > 400 ? 1 : left / 400;
+        paintSnack(context, width, height, state.snackId >= 0 ? (SNACKS[state.snackId] ?? null) : null, zoom);
       } else if (friendRows) {
         paintStage(context, width, height, friendRows, state.worn, state.place, walking, state.reduced, now, restRows, outfitZoom(now, state.outfitUntil));
       } else {
@@ -612,6 +702,44 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     fx.current.play("buy");
   }
 
+  function buyBall(id: number) {
+    const rare = weeklyRareBall();
+    const item = id >= 400 ? rare : BALLS[id];
+    if (!item || live.current.paused || live.current.room !== "lane") return;
+    if (id >= 400 && rare.id !== id) return;
+    if (ownedBalls.has(id)) {
+      setBall(id);
+      live.current.ball = id;
+      note(`${item.name} on`);
+      return;
+    }
+    if (purse < item.price) {
+      note("Not enough RF for that ball");
+      return;
+    }
+    setBallSpent((spent) => spent + item.price);
+    setOwnedBalls((owned) => new Set(owned).add(id));
+    setBall(id);
+    live.current.ball = id;
+    note(`${item.name} bought`);
+    fx.current.play("buy");
+  }
+
+  function buySnack(id: number) {
+    const item = SNACKS[id];
+    if (!item || live.current.paused || live.current.room !== "snack") return;
+    if (purse < item.price) {
+      note("Not enough RF for that snack");
+      return;
+    }
+    setSnackSpent((spent) => spent + item.price);
+    setSnackId(id);
+    live.current.snackId = id;
+    live.current.snackUntil = performance.now() + 2000;
+    note(item.name);
+    fx.current.play("buy");
+  }
+
   function unlock() {
     void sound.current?.unlock();
     music.current?.unlock();
@@ -662,7 +790,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     window.setTimeout(() => setCaption((current) => (current === text ? "" : current)), 1100);
   }
 
-  function cross(way: "in" | "out" | "rink" | "photo" | "gym", fromButton = false) {
+  function cross(way: "in" | "out" | "rink" | "photo" | "gym" | "bowl" | "lane" | "snack", fromButton = false) {
     const state = live.current;
     if (state.paused) return;
     if (!fromButton && state.latched) return;
@@ -670,6 +798,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       if (state.room === "rack" || state.room === "under") return;
       state.latched = true;
       if (state.room === "photo") {
+        state.boothUntil = 0;
+        setStudio(false);
         state.room = "rink";
         setRoom("rink");
         note("The rink");
@@ -683,6 +813,18 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         setCabinet(false);
         setVenue("gym");
         note("Back at the rack");
+        return;
+      }
+      if (state.room === "lane") {
+        state.room = "bowl";
+        setRoom("bowl");
+        note("Bowling");
+        return;
+      }
+      if (state.room === "snack") {
+        state.room = "bowl";
+        setRoom("bowl");
+        note("Bowling");
         return;
       }
       state.room = "rack";
@@ -716,6 +858,33 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       setRoom("gym");
       setVenue("gym");
       note("Click the gym or the arcade");
+      fx.current.play("door");
+      return;
+    }
+    if (way === "bowl") {
+      if (state.room !== "rack") return;
+      state.latched = true;
+      state.room = "bowl";
+      setRoom("bowl");
+      note("Bowling");
+      fx.current.play("door");
+      return;
+    }
+    if (way === "lane") {
+      if (state.room !== "bowl") return;
+      state.latched = true;
+      state.room = "lane";
+      setRoom("lane");
+      note("Lane 1");
+      fx.current.play("door");
+      return;
+    }
+    if (way === "snack") {
+      if (state.room !== "bowl") return;
+      state.latched = true;
+      state.room = "snack";
+      setRoom("snack");
+      note("Snack bar");
       fx.current.play("door");
       return;
     }
@@ -834,6 +1003,28 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     });
   }
 
+  async function payBowl(enter: boolean) {
+    if (live.current.bowlPaid) {
+      if (enter) live.current.cross("lane", true);
+      return;
+    }
+    if (!snapshot || snapshot.consumables < 1n) {
+      note("1 token to bowl");
+      return;
+    }
+    await act(async () => {
+      const current = await client.read();
+      const pending = current.plays.find((play) => play.outcomeId === null);
+      const play = pending ?? (await client.play(1n))[0];
+      if (!play) throw new Error("No token for bowling.");
+      await client.settle(play.id);
+      live.current.bowlPaid = true;
+      setBowlPaid(true);
+      note("Lane is open");
+      if (enter) live.current.cross("lane", true);
+    });
+  }
+
   async function changeTape() {
     if (!snapshot || snapshot.consumables < 1n) {
       note("Need a mall token");
@@ -867,7 +1058,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const definition = client.definition;
   const price = definition.price;
   const maxPrize = maximumPrize(definition);
-  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent : 0n) : 0n;
+  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent + ballSpent + snackSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent - ballSpent - snackSpent : 0n) : 0n;
   const afford = snapshot ? purse >= price : false;
   const backed = snapshot ? snapshot.freeStake >= maxPrize && snapshot.freeStake + price >= maxPrize : false;
   const wornNames = wornLooks.map((look) => look.name).join(", ");
@@ -963,6 +1154,10 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 state.cross("gym", true);
                 return;
               }
+              if (hit === "bowl") {
+                state.cross("bowl", true);
+                return;
+              }
               if (hit) state.aim = hit;
             } else if (state.room === "club") {
               const spot = clubPoint(rect.width, rect.height, x, y);
@@ -1002,15 +1197,43 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 const spot = arcadePoint(rect.width, rect.height, x, y, state.deckBlend);
                 if (spot) state.gymAim = spot;
               }
+            } else if (state.room === "bowl") {
+              if (bowlSnackHit(rect.width, rect.height, x, y)) {
+                state.cross("snack", true);
+                return;
+              }
+              if (bowlLaneHit(rect.width, rect.height, x, y)) {
+                if (!state.bowlPaid) {
+                  void payBowl(true);
+                  return;
+                }
+                state.cross("lane", true);
+                return;
+              }
+              const spot = bowlPoint(rect.width, rect.height, x, y);
+              if (spot) state.bowlAim = spot;
+            } else if (state.room === "lane") {
+              if (lanePoint(rect.width, rect.height, x, y)) {
+                if (!state.bowlPaid) {
+                  note("1 token to bowl");
+                  return;
+                }
+                if (state.rollStart > 0 && performance.now() - state.rollStart < 900) return;
+                const spot = lanePoint(rect.width, rect.height, x, y);
+                state.rollAim = Math.max(-1, Math.min(1, ((spot?.nx ?? 0.34) - 0.34) * 2.4));
+                state.rollStart = performance.now();
+                state.rollHit = false;
+                fx.current.play("serve");
+              }
             } else if (state.room === "photo") {
+              if (state.boothUntil > performance.now()) return;
               if (state.mask <= 0) {
                 note("Put a mask on first");
                 return;
               }
-              const ready = performance.now() + 1800;
-              state.maskUntil = ready;
+              state.boothUntil = performance.now() + 5000;
               state.shotMask = state.mask;
-              state.shotReady = ready;
+              setStudio(true);
               fx.current.play("snap");
               setPhotos((list) => [
                 ...list,
@@ -1098,6 +1321,12 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 ? "Photo booth. Put a mask on, then tap the room. The picture projects on the floor."
               : room === "gym"
                 ? "Click the gym or the arcade. The middle machines cost 1 token."
+              : room === "bowl"
+                ? "Bowling. You can buy snacks at the bar on the left."
+              : room === "lane"
+                ? "Lane 1. Tap toward the pins to bowl. Buy a ball, including the weekly rare."
+              : room === "snack"
+                ? "Snack bar. Tap a snack to buy it."
               : room === "rink"
                 ? `${trackTitle} on the rink. Lap ${laps} of 3. The booth up on the right is the photo booth.`
                 : worn.size > 0
@@ -1160,7 +1389,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </div>
       ) : null}
 
-      {room === "photo" ? (
+      {room === "photo" && !studio ? (
         <div className="rad-rack" aria-label="Photo booth masks">
           {[...MASKS.map((item, id) => ({ item, id, rare: false })), { item: weeklyRareMask(), id: weeklyRareMask().id, rare: true }].map(
             ({ item, id, rare }) => {
@@ -1178,14 +1407,145 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </div>
       ) : null}
 
-      {room === "photo" ? (
+      {room === "photo" && !studio ? (
         <div className="rad-club-bar">
           <p className="rad-track">
             <strong>Photo booth</strong>
-            <span>Tap the room for a photo</span>
+            <span>Tap the room. The picture hits the board, then you leave.</span>
           </p>
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
           <button type="button" disabled={paused} onClick={() => cross("out", true)}>
             Back to the rink
+          </button>
+        </div>
+      ) : null}
+
+      {room === "photo" && studio ? (
+        <div className="rad-club-bar">
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
+        </div>
+      ) : null}
+
+      {room === "bowl" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>Bowling</strong>
+            <span>You can buy snacks at the bar on the left.</span>
+          </p>
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
+          {!bowlPaid ? (
+            <button
+              type="button"
+              className="rad-primary"
+              disabled={paused || busy || !snapshot || snapshot.consumables < 1n}
+              onClick={() => void payBowl(true)}
+            >
+              Play · 1 token
+            </button>
+          ) : null}
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the rack
+          </button>
+        </div>
+      ) : null}
+
+      {room === "snack" ? (
+        <div className="rad-rack" aria-label="Snack bar">
+          {SNACKS.map((item, id) => (
+            <button key={item.name} type="button" className="rad-look" disabled={paused} onClick={() => buySnack(id)}>
+              <span className="rad-swatch" style={{ background: item.color }} aria-hidden="true" />
+              <span className="rad-look-name">{item.name}</span>
+              <small>Buy · {rf(item.price)}</small>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {room === "snack" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>Buy snacks</strong>
+            <span>Tap one to buy it. It pops up for 2 seconds.</span>
+          </p>
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the alley
+          </button>
+        </div>
+      ) : null}
+
+      {room === "lane" ? (
+        <div className="rad-rack" aria-label="Bowling balls">
+          {[...BALLS.map((item, id) => ({ item, id, rare: false })), { item: weeklyRareBall(), id: weeklyRareBall().id, rare: true }].map(
+            ({ item, id, rare }) => {
+              const owned = ownedBalls.has(id);
+              const on = ball === id;
+              return (
+                <button key={id} type="button" className="rad-look" aria-pressed={on} disabled={paused} onClick={() => buyBall(id)}>
+                  <span className="rad-swatch" style={{ background: item.color }} aria-hidden="true" />
+                  <span className="rad-look-name">{item.name}</span>
+                  <small>{on ? "Using" : owned ? "Use" : item.price === 0n ? "Free" : rare ? `Rare · ${rf(item.price)}` : `Buy · ${rf(item.price)}`}</small>
+                </button>
+              );
+            },
+          )}
+        </div>
+      ) : null}
+
+      {room === "lane" ? (
+        <div className="rad-club-bar">
+          <p className="rad-track">
+            <strong>{bowlCard(bowlFrames).done ? `Final ${bowlCard(bowlFrames).total}` : `Score ${bowlCard(bowlFrames).total}`}</strong>
+            <span>{bowlPaid ? "Tap the lane. Center is a strike." : "Pay 1 token for the next game. The house ball is free."}</span>
+          </p>
+          {!bowlPaid ? (
+            <button
+              type="button"
+              className="rad-primary"
+              disabled={paused || busy || !snapshot || snapshot.consumables < 1n}
+              onClick={() => void payBowl(false)}
+            >
+              Play · 1 token
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
+          <button type="button" disabled={paused} onClick={() => cross("out", true)}>
+            Back to the alley
           </button>
         </div>
       ) : null}
@@ -1214,16 +1574,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             <strong>{venue === "arcade" ? "Arcade" : "Gym"}</strong>
             <span>{venue === "arcade" ? "Click the gym or the arcade. 1 token plays a machine." : "Click the gym or the arcade."}</span>
           </p>
-          {venue === "arcade" ? (
-            <button
-              type="button"
-              className="rad-primary"
-              disabled={!snapshot || !afford || !backed || busy || paused}
-              onClick={() => void act(() => client.buy(1n), "purchase")}
-            >
-              Buy token · {rf(price)}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
           <button type="button" disabled={paused} onClick={() => cross("out", true)}>
             Back to the rack
           </button>
@@ -1243,6 +1601,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           >
             Change music · 1 token
           </button>
+          <button
+            type="button"
+            className="rad-primary"
+            disabled={!snapshot || !afford || !backed || busy || paused}
+            onClick={() => void act(() => client.buy(1n), "purchase")}
+          >
+            Buy token · {rf(price)}
+          </button>
           {room === "club" ? (
             <button type="button" className="rad-floor" disabled={paused} onClick={cycleMove}>
               Dance
@@ -1252,7 +1618,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
             Back to the rack
           </button>
         </div>
-      ) : room === "gym" || room === "photo" || room === "under" ? null : (
+      ) : room === "gym" || room === "photo" || room === "under" || room === "bowl" || room === "lane" || room === "snack" ? null : (
         <>
           <div className="rad-rack" aria-label="80s clothes">
             {LOOKS.map((look, index) => {
@@ -1470,6 +1836,12 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           ? `${trackTitle} is the soundtrack. One mall token changes the tape. Tap the floor to walk.`
           : room === "gym"
             ? "Click the gym or the arcade. Weights lift. A middle machine costs 1 token."
+          : room === "bowl"
+            ? "You can buy snacks at the bar on the left. Back to the rack leaves."
+          : room === "lane"
+            ? "Tap up the lane to roll. Buy a ball. One rare ball changes every week."
+          : room === "snack"
+            ? "Tap a snack to buy it. Back to the alley leaves the counter."
           : room === "rink"
             ? `${trackTitle} is playing. One mall token changes the tape. Back to the rack leaves the rink.`
             : "The bag at the top is the workout room. Left door is the roller rink. Right door is the club once you're dressed."}

@@ -3,7 +3,6 @@ import { paintFriend, paintSign } from "./paint";
 import floorUrl from "./art/dance-neon.jpg";
 import gymUrl from "./art/gym-color-2.jpg";
 import arcadeUrl from "./art/arcade-neon-2.jpg";
-import arcadeFriendUrl from "./art/arcade-friend.png";
 
 const INK = "#141018";
 const CREAM = "#f4ecdf";
@@ -344,55 +343,99 @@ function paintDisco(
   now: number,
   reduced: boolean,
 ) {
-  const cx = layout.x + layout.w * 0.528;
-  const cy = layout.y + layout.h * 0.443;
-  const radius = Math.max(10, layout.h * 0.042);
+  const cx = layout.x + layout.w * 0.487;
+  const cy = layout.y + layout.h * 0.436;
+  const radius = Math.max(8, layout.h * 0.028);
   const spin = reduced ? 0.4 : now / 260;
   const colors = [CYAN, MAGENTA, GOLD, CREAM, "#7cff6b", "#7aa2ff"];
   ctx.save();
   ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.clip();
-  for (let i = 0; i < 12; i += 1) {
-    const angle = spin + i * 0.62;
-    ctx.globalAlpha = 0.72;
-    ctx.fillStyle = colors[i % colors.length] ?? CREAM;
-    ctx.fillRect(
-      cx + Math.cos(angle) * radius * 0.55 - radius * 0.22,
-      cy + Math.sin(angle * 1.4) * radius * 0.45 - radius * 0.12,
-      radius * 0.42,
-      radius * 0.24,
-    );
+  ctx.rect(layout.x - layout.w, layout.y - layout.h, layout.w * 3, layout.h * 3);
+  ctx.arc(cx, cy, radius * 1.05, 0, Math.PI * 2, true);
+  ctx.clip("evenodd");
+  for (let i = 0; i < 10; i += 1) {
+    const angle = spin + (i * Math.PI * 2) / 10;
+    const color = colors[i % colors.length] ?? CREAM;
+    const len = layout.h * (0.22 + (i % 3) * 0.04);
+    const spread = 0.16;
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle - spread) * len, cy + Math.sin(angle - spread) * len);
+    ctx.lineTo(cx + Math.cos(angle + spread) * len, cy + Math.sin(angle + spread) * len);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = "#ffffff";
-  ctx.beginPath();
-  ctx.arc(cx + Math.cos(spin) * radius * 0.38, cy + Math.sin(spin) * radius * 0.32, radius * 0.16, 0, Math.PI * 2);
-  ctx.fill();
-  for (let i = 0; i < 16; i += 1) {
-    const angle = spin * 0.65 + (i * Math.PI * 2) / 16;
-    const nx = 0.48 + Math.cos(angle) * (0.16 + (i % 3) * 0.07);
-    const ny = 0.64 + Math.sin(angle) * 0.08;
+  const art = floorArt();
+  if (art) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.12, 0, Math.PI * 2);
+    ctx.clip();
+    const smoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(art, layout.x, layout.y, layout.w, layout.h);
+    ctx.imageSmoothingEnabled = smoothing;
+    ctx.restore();
+  }
+  for (let i = 0; i < 12; i += 1) {
+    const angle = spin * 0.65 + (i * Math.PI * 2) / 12;
+    const nx = 0.487 + Math.cos(angle) * (0.1 + (i % 3) * 0.035);
+    const ny = 0.66 + Math.sin(angle) * 0.055;
     const x = layout.x + nx * layout.w;
     const y = layout.y + ny * layout.h;
     const color = colors[i % colors.length] ?? CREAM;
-    const spot = layout.w * 0.03;
+    const spot = layout.w * 0.028;
     const glow = ctx.createRadialGradient(x, y, 0, x, y, spot);
     glow.addColorStop(0, color);
     glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.globalAlpha = 0.42;
+    ctx.globalAlpha = 0.4;
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.ellipse(x, y, spot, spot * 0.42, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.16;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(1, layout.h * 0.004);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy + radius);
-    ctx.lineTo(x, y);
-    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function paintFog(
+  ctx: CanvasRenderingContext2D,
+  layout: { x: number; y: number; w: number; h: number },
+  now: number,
+  reduced: boolean,
+) {
+  const machines = [
+    { nx: 0.2, ny: 0.7, color: CYAN, dir: 1 },
+    { nx: 0.76, ny: 0.66, color: MAGENTA, dir: -1 },
+  ];
+  for (const machine of machines) {
+    const x = layout.x + machine.nx * layout.w;
+    const y = layout.y + machine.ny * layout.h;
+    const s = Math.max(6, layout.h * 0.026);
+    ctx.fillStyle = "#141018";
+    ctx.fillRect(x - s, y - s * 0.55, s * 2.1, s);
+    ctx.fillStyle = machine.color;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(x - s, y - s * 0.55, s * 2.1, Math.max(2, s * 0.18));
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#2a2430";
+    ctx.fillRect(x + machine.dir * s * 0.15, y - s * 1.05, s * 0.5, s * 0.55);
+    for (let i = 0; i < 7; i += 1) {
+      const t = reduced ? i / 7 : ((now / 1600 + i / 7) % 1);
+      const px = x + machine.dir * (s + t * layout.w * 0.2);
+      const py = y - s * 0.9 - Math.sin(t * Math.PI) * layout.h * 0.035;
+      const rad = layout.h * (0.018 + t * 0.045);
+      const glow = ctx.createRadialGradient(px, py, 0, px, py, rad * 1.6);
+      glow.addColorStop(0, machine.color);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.globalAlpha = 0.28 * (1 - t);
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.ellipse(px, py, rad * 1.7, rad * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -438,6 +481,7 @@ export function paintClub(
     ctx.imageSmoothingEnabled = smoothing;
   }
   paintDisco(ctx, layout, now, reduced);
+  paintFog(ctx, layout, now, reduced);
 
   const shelfH = layout.h * 0.1;
   const dancerScale = Math.max(1, Math.round(shelfH / 22));
@@ -590,65 +634,6 @@ export function gymZoom(now: number, until: number) {
   return Math.max(0, 1 - (elapsed - 4400) / 500);
 }
 
-function paintArcadePlayer(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  scale: number,
-  shirt: string,
-  hair: string,
-  bob: number,
-) {
-  const art = arcadeFriendArt();
-  if (!art || typeof document === "undefined") return;
-  const height = Math.max(8, Math.round(scale * 8));
-  const width = Math.max(8, Math.round(height * (art.naturalWidth / art.naturalHeight)));
-  const scratch = arcadeScratch(width, height);
-  const g = scratch.getContext("2d");
-  if (!g) return;
-  g.clearRect(0, 0, width, height);
-  g.imageSmoothingEnabled = false;
-  g.drawImage(art, 0, 0, width, height);
-  g.globalCompositeOperation = "source-atop";
-  g.fillStyle = hair;
-  g.fillRect(width * 0.18, height * 0.1, width * 0.64, Math.max(2, height * 0.045));
-  g.fillStyle = INK;
-  g.fillRect(width * 0.16, height * 0.3, width * 0.68, Math.max(2, height * 0.055));
-  g.fillStyle = CYAN;
-  g.fillRect(width * 0.2, height * 0.312, width * 0.16, Math.max(1, height * 0.028));
-  g.fillRect(width * 0.62, height * 0.312, width * 0.16, Math.max(1, height * 0.028));
-  g.fillStyle = shirt;
-  g.fillRect(0, height * 0.54, width, height * 0.24);
-  g.fillStyle = GOLD;
-  g.fillRect(width * 0.14, height * 0.86, width * 0.22, height * 0.1);
-  g.fillRect(width * 0.64, height * 0.86, width * 0.22, height * 0.1);
-  g.globalCompositeOperation = "source-over";
-  ctx.fillStyle = "rgba(0,0,0,0.4)";
-  ctx.fillRect(x - width * 0.28, y + bob, width * 0.56, Math.max(1, height * 0.025));
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(scratch, Math.round(x - width / 2), Math.round(y - height + bob));
-}
-
-let arcadeFriendImage: HTMLImageElement | null = null;
-let arcadeFriendScratch: HTMLCanvasElement | null = null;
-
-function arcadeFriendArt() {
-  if (!arcadeFriendImage && typeof Image !== "undefined") {
-    arcadeFriendImage = new Image();
-    arcadeFriendImage.src = arcadeFriendUrl;
-  }
-  return arcadeFriendImage && arcadeFriendImage.complete && arcadeFriendImage.naturalWidth > 0 ? arcadeFriendImage : null;
-}
-
-function arcadeScratch(width: number, height: number) {
-  if (!arcadeFriendScratch) arcadeFriendScratch = document.createElement("canvas");
-  if (arcadeFriendScratch.width !== width || arcadeFriendScratch.height !== height) {
-    arcadeFriendScratch.width = width;
-    arcadeFriendScratch.height = height;
-  }
-  return arcadeFriendScratch;
-}
-
 export function gymDeckHit(width: number, height: number, x: number, y: number, blend: number): "gym" | "arcade" | null {
   const decks = deckRects(width, height, blend);
   const onGym = inside(decks.gym, x, y);
@@ -687,10 +672,10 @@ export function arcadePoint(width: number, height: number, x: number, y: number,
   const layout = deckRects(width, height, blend).arcade;
   const nx = (x - layout.x) / layout.w;
   const ny = (y - layout.y) / layout.h;
-  if (nx < 0.16 || nx > 0.86 || ny < 0.68 || ny > 0.94) return null;
+  if (nx < 0.12 || nx > 0.88 || ny < 0.4 || ny > 0.92) return null;
   return {
-    nx: Math.min(0.82, Math.max(0.2, nx)),
-    ny: Math.min(0.9, Math.max(0.72, ny)),
+    nx: Math.min(0.84, Math.max(0.16, nx)),
+    ny: Math.min(0.88, Math.max(0.42, ny)),
   };
 }
 
@@ -745,29 +730,6 @@ export function paintGym(
   paintSign(ctx, "Gym", decks.gym.x + decks.gym.w / 2, Math.max(28, decks.gym.y + decks.gym.h * 0.04), decks.gym.h, 0.55);
   paintSign(ctx, "Arcade", decks.arcade.x + decks.arcade.w / 2, Math.max(28, decks.arcade.y + decks.arcade.h * 0.04), decks.arcade.h, 0.55);
   const layout = deck === "arcade" ? decks.arcade : decks.gym;
-  const crowdScale = Math.max(1, Math.round((decks.arcade.h * 0.143) / 10));
-  ctx.save();
-  ctx.globalAlpha = 0.45 + 0.55 * blend;
-  const players = [
-    { nx: 0.2, ny: 0.58, shirt: MAGENTA, hair: CYAN },
-    { nx: 0.32, ny: 0.48, shirt: GOLD, hair: INK },
-    { nx: 0.46, ny: 0.68, shirt: CYAN, hair: GOLD },
-    { nx: 0.62, ny: 0.5, shirt: "#7a3cff", hair: CREAM },
-    { nx: 0.74, ny: 0.58, shirt: "#ff7a1a", hair: MAGENTA },
-  ];
-  for (const player of players) {
-    const bob = reduced ? 0 : Math.round(Math.sin(now / 180 + player.nx * 12) * crowdScale * 0.35);
-    paintArcadePlayer(
-      ctx,
-      decks.arcade.x + player.nx * decks.arcade.w,
-      decks.arcade.y + player.ny * decks.arcade.h,
-      crowdScale,
-      player.shirt,
-      player.hair,
-      bob,
-    );
-  }
-  ctx.restore();
   const active = gear !== "" && now < until;
   const elapsed = active ? GYM_MS - (until - now) : 0;
   const cycle = active && !reduced ? (elapsed / 520) % 1 : 0;

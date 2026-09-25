@@ -2,6 +2,7 @@ import type { Look } from "./looks";
 import { paintFriend, paintSign } from "./paint";
 import floorUrl from "./art/skate-neon.jpg";
 import photoUrl from "./art/photo-neon.jpg";
+import studioUrl from "./art/photo-studio.jpg";
 
 const INK = "#141018";
 const CREAM = "#f4ecdf";
@@ -236,6 +237,7 @@ function paintQuads(
 }
 let floorImage: HTMLImageElement | null = null;
 let photoImage: HTMLImageElement | null = null;
+let studioImage: HTMLImageElement | null = null;
 
 function floorArt() {
   if (!floorImage && typeof Image !== "undefined") {
@@ -243,6 +245,14 @@ function floorArt() {
     floorImage.src = floorUrl;
   }
   return floorImage && floorImage.complete && floorImage.naturalWidth > 0 ? floorImage : null;
+}
+
+function studioArt() {
+  if (!studioImage && typeof Image !== "undefined") {
+    studioImage = new Image();
+    studioImage.src = studioUrl;
+  }
+  return studioImage && studioImage.complete && studioImage.naturalWidth > 0 ? studioImage : null;
 }
 
 function photoArt() {
@@ -527,6 +537,44 @@ export function paintUnder(
   ctx.ellipse(footX, footY, scale * 7, scale * 1.5, 0, 0, Math.PI * 2);
   ctx.fill();
   paintFriend(ctx, footX - 8 * scale, footY - 16 * scale, scale, rows, worn, restRows);
+}
+
+function studioLayout(width: number, height: number) {
+  const aspect = 1500 / 1010;
+  let w = width * 0.98;
+  let h = w / aspect;
+  if (h > height * 0.96) {
+    h = height * 0.96;
+    w = h * aspect;
+  }
+  return { x: (width - w) / 2, y: (height - h) / 2, w, h };
+}
+
+export function paintStudio(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  rows: readonly string[] | null,
+  worn: readonly Look[],
+  mask: Mask,
+  restRows?: readonly string[] | null,
+) {
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, width, height);
+  const layout = studioLayout(width, height);
+  const art = studioArt();
+  if (art) {
+    const smoothing = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(art, layout.x, layout.y, layout.w, layout.h);
+    ctx.imageSmoothingEnabled = smoothing;
+  }
+  if (!rows) return;
+  const centerX = layout.x + layout.w * 0.613;
+  const centerY = layout.y + layout.h * 0.363;
+  const shot = Math.max(2, Math.round(layout.h * 0.22 / 16));
+  paintFriend(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, rows, worn, restRows);
+  paintMask(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, mask);
 }
 
 function photoLayout(width: number, height: number) {

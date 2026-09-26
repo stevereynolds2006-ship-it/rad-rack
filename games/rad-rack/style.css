@@ -488,6 +488,25 @@
   width: 100%;
 }
 
+.rad-cube-moves {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.rad-cube-moves span {
+  display: flex;
+  gap: 4px;
+}
+
+.rad-cube-moves button {
+  width: auto;
+  flex: 1;
+  min-height: 36px;
+  padding: 6px 0;
+}
+
 .rad-trip {
   position: absolute;
   inset: 0;

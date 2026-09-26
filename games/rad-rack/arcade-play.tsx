@@ -475,7 +475,7 @@ export function RcPlay({
   const dieRef = useRef(onDie);
   dieRef.current = onDie;
   const [score, setScore] = useState(0);
-  const [note, setNote] = useState("Drag to steer. Three laps.");
+  const [note, setNote] = useState("Drag to steer. Six laps.");
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -514,31 +514,41 @@ export function RcPlay({
         carX += (aimX - carX) * Math.min(1, dt * 7);
         carX = Math.max(roadL + 16, Math.min(roadR - 16, carX));
         dist += speed * dt;
-        speed = Math.min(210, 110 + dist * 0.03);
-        const nextLap = Math.min(3, Math.floor(dist / 760));
+        const hard = lap >= 3;
+        speed = Math.min(hard ? 250 : 150, (hard ? 170 : 100) + dist * 0.012);
+        const nextLap = Math.min(6, Math.floor(dist / 1400));
         if (nextLap > lap) {
           lap = nextLap;
           setScore(lap);
-          sfx.current.play(lap >= 3 ? "win" : "serve");
-          if (lap >= 3) {
+          if (lap >= 6) {
             won = true;
+            sfx.current.play("win");
             setNote("You finished the mall");
+          } else if (lap === 3) {
+            sfx.current.play("serve");
+            setNote("Harder");
           } else {
-            setNote(`Lap ${lap} of 3`);
+            sfx.current.play("serve");
+            setNote(`Lap ${lap} of 6`);
           }
         }
         spawnIn -= dt;
         if (spawnIn <= 0) {
           const lanes = [58, 96, 134, 172];
-          traffic.push({
-            x: lanes[Math.floor(Math.random() * lanes.length)] ?? 96,
-            y: -36,
-            color: RC_COLORS[Math.floor(Math.random() * RC_COLORS.length)] ?? "#ff2bd6",
-          });
-          spawnIn = Math.max(0.38, 0.95 - dist / 4000);
+          const drop = (lane: number) => {
+            traffic.push({
+              x: lanes[lane] ?? 96,
+              y: -36,
+              color: RC_COLORS[Math.floor(Math.random() * RC_COLORS.length)] ?? "#ff2bd6",
+            });
+          };
+          const lane = Math.floor(Math.random() * lanes.length);
+          drop(lane);
+          if (hard) drop((lane + 2) % lanes.length);
+          spawnIn = Math.max(hard ? 0.28 : 0.7, (hard ? 0.62 : 1.15) - dist / 8000);
         }
         traffic.forEach((car) => {
-          car.y += speed * dt * 0.55;
+          car.y += speed * dt * (hard ? 0.82 : 0.5);
         });
         for (let index = traffic.length - 1; index >= 0; index -= 1) {
           const car = traffic[index];
@@ -598,7 +608,7 @@ export function RcPlay({
   return (
     <div className="rad-arcade" onPointerDown={(event) => event.stopPropagation()}>
       <p className="rad-arcade-title">
-        Mall RC <span>{score} / 3</span>
+        Mall RC <span>{score} / 6</span>
       </p>
       <canvas ref={canvasRef} className="rad-arcade-screen" />
       <p className="rad-arcade-note">{note}</p>

@@ -10,6 +10,7 @@ import { LOOKS, chanceLabel, lookById, weeklyRareLook } from "./looks";
 import { DANCE_MOVES, GLOVES, GYM_MS, arcadeCabinetHit, arcadePoint, clubPoint, gloveById, gymDeckHit, gymGearHit, gymPoint, paintClub, paintGym, weeklyRareGlove } from "./club";
 import { createGameplaySfx } from "./sfx";
 import { ArcadePlay, MazePlay, RcPlay, TripWorld } from "./arcade-play";
+import { CubePlay } from "./cube-play";
 import { TAPES, createClubMusic, type ClubMusic } from "./music";
 import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, bowlPoint, bowlSnackHit, lanePoint, outfitZoom, paintBowl, paintLane, paintSnack, paintStage, pinsForAim, wardrobeHit, weeklyRareBall, WARDROBE_CURTAIN, type BowlFrame } from "./paint";
 import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
@@ -139,6 +140,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
   const [cabinet, setCabinet] = useState<"off" | "pick" | "break" | "maze" | "rc">("off");
+  const [pit, setPit] = useState<"pick" | "lights" | "cube">("pick");
   const [trip, setTrip] = useState(false);
   const [venue, setVenue] = useState<"gym" | "arcade">("gym");
   const [laps, setLaps] = useState(0);
@@ -391,6 +393,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           state.crack = 0;
           state.latched = true;
           setRoom("under");
+          setPit("pick");
           setCaption("Under the mall");
         }
       } else if (state.room === "rack") {
@@ -817,6 +820,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       state.place = { nx: 0.42, ny: 0.56 };
       state.aim = null;
       setLaps(0);
+      setPit("pick");
       setRoom("rack");
       note("Burned 1.5 tokens");
     });
@@ -1432,7 +1436,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 ? `Sound is off. Tap the floor to walk. Back to the rack leaves the floor.`
                 : `${trackTitle} is playing. Dance changes your move. Tap the floor to walk.`
               : room === "under"
-                ? "Under the mall. The lights cannot all go out. Buy a token, then spend 3 to get back up."
+                ? pit === "pick"
+                  ? "The floor gave way. Pick the impossible lights, or the cube."
+                  : pit === "cube"
+                    ? "Turn the faces until every side is one color. Solve it to get out, or spend 3 tokens."
+                    : "Under the mall. The lights cannot all go out. Buy a token, then spend 3 to get back up."
               : room === "photo"
                 ? "Photo booth. Put a mask on, then tap the room. The picture projects on the floor."
               : room === "gym"
@@ -1452,7 +1460,20 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                   : "Try a look on, or tap the table to see what you own. The club stays shut until your Friend is dressed.")}
       </p>
 
-      {room === "under" ? (
+      {room === "under" && pit === "pick" ? (
+        <div className="rad-arcade" onPointerDown={(event) => event.stopPropagation()}>
+          <p className="rad-arcade-title">Under the mall</p>
+          <p className="rad-arcade-note">Pick one.</p>
+          <button type="button" onClick={() => setPit("lights")}>
+            Impossible lights
+          </button>
+          <button type="button" onClick={() => setPit("cube")}>
+            Cube
+          </button>
+        </div>
+      ) : null}
+
+      {room === "under" && pit === "lights" ? (
         <div className="rad-rack" aria-label="Impossible lights">
           {lights.map((on, index) => (
             <button key={index} type="button" className="rad-look" aria-pressed={on} onClick={() => flipLight(index)}>
@@ -1464,7 +1485,27 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         </div>
       ) : null}
 
-      {room === "under" ? (
+      {room === "under" && pit === "cube" ? (
+        <CubePlay
+          sfx={fx}
+          onBack={() => setPit("pick")}
+          onSolved={() => {
+            const state = live.current;
+            state.room = "rink";
+            state.skate = 0.5;
+            state.lapMark = 0.5;
+            state.lapShown = 0;
+            state.crack = 0;
+            state.latched = true;
+            setLaps(0);
+            setPit("pick");
+            setRoom("rink");
+            note("Solved");
+          }}
+        />
+      ) : null}
+
+      {room === "under" && pit !== "pick" ? (
         <div className="rad-actions">
           <button
             type="button"
@@ -1477,6 +1518,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           <button type="button" className="rad-primary" disabled={paused || busy || !snapshot || snapshot.consumables < 3n} onClick={buyOut}>
             Leave · 3 tokens
           </button>
+          {pit === "lights" ? (
+            <button type="button" onClick={() => setPit("pick")}>
+              Other choice
+            </button>
+          ) : null}
         </div>
       ) : null}
 

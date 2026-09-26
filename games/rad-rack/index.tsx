@@ -1019,6 +1019,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   live.current.cycleMove = cycleMove;
 
   function ownsLook(index: number) {
+    if (lookById(index).price === 0n) return true;
     if (ownedLooks.has(index)) return true;
     return index < LOOKS.length && (snapshot?.inventory[index] ?? 0n) > 0n;
   }
@@ -1045,12 +1046,16 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     const rare = weeklyRareLook();
     if (index >= 100 && rare.id !== index && !ownedLooks.has(index)) return;
     const look = lookById(index);
-    if (ownsLook(index)) {
+    if (look.price === 0n || ownsLook(index)) {
       toggleWear(index);
       return;
     }
+    if (!snapshot) {
+      note("Connect your wallet");
+      return;
+    }
     if (purse < look.price) {
-      note("Not enough RF for that outfit");
+      note("Not enough rare coins in your wallet");
       return;
     }
     setLookSpent((spent) => spent + look.price);
@@ -1842,7 +1847,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 >
                   <span className="rad-swatch" style={{ background: look.swatch }} aria-hidden="true" />
                   <span className="rad-look-name">{look.name}</span>
-                  <small>{on ? "Wearing" : owned ? "Owned" : rare ? `Rare · ${rf(look.price)}` : `Buy · ${rf(look.price)}`}</small>
+                  <small>
+                    {on ? "Wearing" : look.price === 0n ? "Basic" : owned ? "Owned" : rare ? `Rare · ${rf(look.price)}` : `Buy · ${rf(look.price)}`}
+                  </small>
                 </button>
               );
             })}

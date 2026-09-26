@@ -243,7 +243,7 @@ export function chanceLabel(bps: number): string {
 const RF = 10n ** 18n;
 const WEEK = 7 * 24 * 60 * 60 * 1000;
 
-export const LOOK_PRICES: readonly bigint[] = [1n, 2n, 2n, 3n, 3n, 4n, 5n, 6n, 7n, 4n].map((price) => price * RF);
+export const LOOK_PRICES: readonly bigint[] = [0n, 2n, 2n, 3n, 3n, 4n, 5n, 6n, 7n, 4n].map((price) => price * RF);
 
 const RARE_LOOKS: readonly (Look & { readonly price: bigint })[] = [
   {

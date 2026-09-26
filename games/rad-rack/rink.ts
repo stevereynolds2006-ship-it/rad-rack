@@ -605,6 +605,29 @@ export function paintStudio(
     paintMask(ctx, x - 8 * shot, y - 8 * shot, shot, print.mask);
   });
   ctx.restore();
+  const latest = prints[prints.length - 1];
+  if (!latest) return;
+  const frames = [
+    { x: 756, y: 440, w: 46, h: 46 },
+    { x: 756, y: 492, w: 46, h: 48 },
+    { x: 756, y: 542, w: 46, h: 46 },
+  ];
+  for (const frame of frames) {
+    const sx = layout.x + (frame.x / 1500) * layout.w;
+    const sy = layout.y + (frame.y / 1010) * layout.h;
+    const sw = (frame.w / 1500) * layout.w;
+    const sh = (frame.h / 1010) * layout.h;
+    const fit = Math.max(1, Math.round(Math.min(sw, sh) / 16));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(sx, sy, sw, sh);
+    ctx.clip();
+    ctx.fillStyle = "#24345c";
+    ctx.fillRect(sx, sy, sw, sh);
+    paintFriend(ctx, sx + sw / 2 - 8 * fit, sy + sh / 2 - 7 * fit, fit, rows, latest.worn, restRows);
+    paintMask(ctx, sx + sw / 2 - 8 * fit, sy + sh / 2 - 7 * fit, fit, latest.mask);
+    ctx.restore();
+  }
 }
 
 function photoLayout(width: number, height: number) {

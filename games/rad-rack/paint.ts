@@ -1094,7 +1094,7 @@ export function paintStage(
   paintFriend(ctx, footX - 8 * scale, footY - 16 * scale + bob, scale, rows, worn, restRows);
 }
 
-export function paintSign(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, roomH: number, scale = 1) {
+export function paintSign(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, roomH: number, scale = 1, plate: "light" | "dark" = "light") {
   const fontSize = Math.max(9, Math.round(roomH * 0.046 * scale));
   ctx.save();
   ctx.imageSmoothingEnabled = true;
@@ -1110,14 +1110,15 @@ export function paintSign(ctx: CanvasRenderingContext2D, text: string, cx: numbe
   const y = cy;
   const shadow = Math.max(scale < 1 ? 4 : 7, Math.round(fontSize * 0.34));
   const border = Math.max(scale < 1 ? 2 : 3, Math.round(fontSize * 0.09));
+  const dark = plate === "dark";
   ctx.fillStyle = "#111111";
   ctx.fillRect(x + shadow, y + shadow, w, h);
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = dark ? "#000000" : "#ffffff";
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "#111111";
+  ctx.strokeStyle = dark ? "#f4ecdf" : "#111111";
   ctx.lineWidth = border;
   ctx.strokeRect(x + border / 2, y + border / 2, w - border, h - border);
-  ctx.fillStyle = "#111111";
+  ctx.fillStyle = dark ? "#f4ecdf" : "#111111";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, cx, y + h / 2);

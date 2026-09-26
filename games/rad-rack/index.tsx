@@ -9,7 +9,7 @@ import { createFriendSoundKit, type FriendSoundCue, type FriendSoundKit } from "
 import { LOOKS, chanceLabel, lookById, weeklyRareLook } from "./looks";
 import { DANCE_MOVES, GLOVES, GYM_MS, arcadeCabinetHit, arcadePoint, clubPoint, gloveById, gymDeckHit, gymGearHit, gymPoint, paintClub, paintGym, weeklyRareGlove } from "./club";
 import { createGameplaySfx } from "./sfx";
-import { ArcadePlay, TripWorld } from "./arcade-play";
+import { ArcadePlay, MazePlay, RcPlay, TripWorld } from "./arcade-play";
 import { TAPES, createClubMusic, type ClubMusic } from "./music";
 import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, bowlPoint, bowlSnackHit, lanePoint, outfitZoom, paintBowl, paintLane, paintSnack, paintStage, pinsForAim, wardrobeHit, weeklyRareBall, WARDROBE_CURTAIN, type BowlFrame } from "./paint";
 import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
@@ -138,7 +138,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [infoOpen, setInfoOpen] = useState(true);
   const [photos, setPhotos] = useState<SavedPhoto[]>([]);
   const [viewPhoto, setViewPhoto] = useState<number | null>(null);
-  const [cabinet, setCabinet] = useState(false);
+  const [cabinet, setCabinet] = useState<"off" | "pick" | "break" | "maze" | "rc">("off");
   const [trip, setTrip] = useState(false);
   const [venue, setVenue] = useState<"gym" | "arcade">("gym");
   const [laps, setLaps] = useState(0);
@@ -847,7 +847,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         state.place = { nx: 0.42, ny: 0.56 };
         state.aim = null;
         setRoom("rack");
-        setCabinet(false);
+        setCabinet("off");
         setVenue("gym");
         note("Back at the rack");
         return;
@@ -1065,10 +1065,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
   }
 
-  async function playCabinet() {
+  async function playCabinet(kind: "break" | "maze" | "rc") {
     if (live.current.room !== "gym" || live.current.deck !== "arcade") return;
     if (!snapshot || snapshot.consumables < 1n) {
       note("1 token to play");
+      setCabinet("off");
       return;
     }
     await act(async () => {
@@ -1078,7 +1079,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       if (!play) throw new Error("No token for the arcade.");
       await client.settle(play.id);
       burnToken(1n);
-      setCabinet(true);
+      setCabinet(kind);
       fx.current.play("serve");
       note("Burned 0.5 token");
     });
@@ -1155,6 +1156,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       aria-label={room === "club" ? "The Floor dance room" : room === "gym" ? "Workout room" : room === "rink" ? "Roller rink" : room === "photo" ? "Photo booth" : room === "under" ? "Secret underground" : "Rad Rack fitting room"}
       onPointerDown={unlock}
     >
+      {cabinet === "break" || cabinet === "maze" || cabinet === "rc" || trip ? null : (
       <button
         type="button"
         className="rad-mark-btn"
@@ -1165,7 +1167,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       >
         <img src={topMarkUrl} alt="" />
       </button>
-      {statsOpen ? (
+      )}
+      {statsOpen && cabinet !== "break" && cabinet !== "maze" && cabinet !== "rc" && !trip ? (
         <header className="rad-top" onPointerDown={(event) => event.stopPropagation()}>
           <div className="rad-brand">
             <p className="rad-mark">Rad Rack</p>
@@ -1273,7 +1276,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 state.gymUntil = 0;
                 state.gymAim = null;
                 state.gymSpot = picked === "arcade" ? { nx: 0.5, ny: 0.8 } : { nx: 0.42, ny: 0.58 };
-                if (picked !== "arcade") setCabinet(false);
+                if (picked !== "arcade") setCabinet("off");
                 setVenue(picked);
                 note(picked === "arcade" ? "Arcade" : "Gym");
                 return;
@@ -1292,7 +1295,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                 if (spot) state.gymAim = spot;
               } else {
                 if (arcadeCabinetHit(rect.width, rect.height, x, y, state.deckBlend)) {
-                  void playCabinet();
+                  if (!snapshot || snapshot.consumables < 1n) note("1 token to play");
+                  else setCabinet("pick");
                   return;
                 }
                 const spot = arcadePoint(rect.width, rect.height, x, y, state.deckBlend);
@@ -1350,12 +1354,49 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         />
         {flash && <div className="rad-flash" aria-hidden="true" />}
         {caption && <p className={caption === "Cheese" ? "rad-caption rad-caption-right" : "rad-caption"}>{caption}</p>}
-        {cabinet ? (
+        {cabinet === "pick" ? (
+          <div className="rad-arcade" onPointerDown={(event) => event.stopPropagation()}>
+            <p className="rad-arcade-title">Pick a game</p>
+            <p className="rad-arcade-note">One token. Half of it burns.</p>
+            <button type="button" onClick={() => void playCabinet("break")}>
+              Rad Break
+            </button>
+            <button type="button" onClick={() => void playCabinet("maze")}>
+              Dot Run
+            </button>
+            <button type="button" onClick={() => void playCabinet("rc")}>
+              Mall RC
+            </button>
+            <button type="button" onClick={() => setCabinet("off")}>
+              Not now
+            </button>
+          </div>
+        ) : cabinet === "maze" ? (
+          <MazePlay
+            sfx={fx}
+            rows={sprites ? spriteFrame(sprites, "down", false, 0, "right").frame.rows : null}
+            worn={wornLooks}
+            onClose={() => setCabinet("off")}
+            onDie={() => {
+              setCabinet("off");
+              setTrip(true);
+            }}
+          />
+        ) : cabinet === "rc" ? (
+          <RcPlay
+            sfx={fx}
+            onClose={() => setCabinet("off")}
+            onDie={() => {
+              setCabinet("off");
+              setTrip(true);
+            }}
+          />
+        ) : cabinet === "break" ? (
           <ArcadePlay
             sfx={fx}
-            onClose={() => setCabinet(false)}
+            onClose={() => setCabinet("off")}
             onDie={() => {
-              setCabinet(false);
+              setCabinet("off");
               setTrip(true);
             }}
           />

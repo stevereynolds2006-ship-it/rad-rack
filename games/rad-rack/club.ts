@@ -1,4 +1,4 @@
-import type { Look } from "./looks";
+import { LOOKS, type Look } from "./looks";
 import { paintFriend, paintSign } from "./paint";
 import floorUrl from "./art/dance-neon.jpg";
 import gymUrl from "./art/gym-color-2.jpg";
@@ -484,34 +484,43 @@ export function paintClub(
   paintFog(ctx, layout, now, reduced);
 
   const shelfH = layout.h * 0.1;
-  const dancerScale = Math.max(1, Math.round(shelfH / 22));
+  const friendScale = Math.max(1, Math.round((shelfH / 32) * 1.5));
   const spot = (nx: number, ny: number) => ({
     x: layout.x + nx * layout.w,
     y: layout.y + ny * layout.h,
   });
 
   const crowd = [
-    { crew: CREW[0], nx: 0.28, ny: 0.66 },
-    { crew: CREW[1], nx: 0.4, ny: 0.74 },
-    { crew: CREW[3], nx: 0.55, ny: 0.64 },
-    { crew: CREW[4], nx: 0.66, ny: 0.74 },
-    { crew: CREW[5], nx: 0.34, ny: 0.58 },
-    { crew: CREW[6], nx: 0.5, ny: 0.7 },
-    { crew: CREW[7], nx: 0.72, ny: 0.66 },
-  ].filter((item): item is { crew: Crew; nx: number; ny: number } => Boolean(item.crew));
+    { nx: 0.28, ny: 0.66, worn: [LOOKS[0], LOOKS[2], LOOKS[4]] },
+    { nx: 0.4, ny: 0.74, worn: [LOOKS[3], LOOKS[5]] },
+    { nx: 0.55, ny: 0.64, worn: [LOOKS[1], LOOKS[6]] },
+    { nx: 0.66, ny: 0.74, worn: [LOOKS[4], LOOKS[7]] },
+    { nx: 0.34, ny: 0.58, worn: [LOOKS[0], LOOKS[5], LOOKS[9]] },
+    { nx: 0.5, ny: 0.7, worn: [LOOKS[2], LOOKS[3], LOOKS[8]] },
+    { nx: 0.72, ny: 0.66, worn: [LOOKS[1], LOOKS[6], LOOKS[7]] },
+  ].map((item) => ({
+    nx: item.nx,
+    ny: item.ny,
+    worn: item.worn.filter((look): look is Look => Boolean(look)),
+  }));
 
   const friendSpot = spot(place.nx, place.ny);
-  const shift = rows && !moving ? danceOffset(move, beat, Math.max(1, Math.round(shelfH / 32)), reduced) : { x: 0, y: 0 };
+  const shift = rows && !moving ? danceOffset(move, beat, friendScale, reduced) : { x: 0, y: 0 };
 
   const layers: { y: number; draw: () => void }[] = crowd.map((item) => ({
       y: spot(item.nx, item.ny).y,
       draw: () => {
         const at = spot(item.nx, item.ny);
-        paintDancerAt(ctx, item.crew, beat, reduced, at.x, at.y, dancerScale, move);
+        const hop = danceOffset(move, beat, friendScale, reduced);
+        const footX = at.x + hop.x;
+        const footY = at.y + hop.y;
+        if (!rows) return;
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(footX - friendScale * 5, footY - friendScale * 0.3, friendScale * 10, Math.max(2, friendScale * 0.4));
+        paintFriend(ctx, footX - 8 * friendScale, footY - 16 * friendScale, friendScale, rows, item.worn, restRows);
       },
     }));
   if (rows) {
-    const friendScale = Math.max(1, Math.round((shelfH / 32) * 1.5));
     layers.push({
       y: friendSpot.y + shift.y,
       draw: () => {
@@ -726,9 +735,9 @@ export function paintGym(
     drawIsland(decks.arcade, arcade, blend);
   }
   ctx.imageSmoothingEnabled = smoothing;
-  paintSign(ctx, "Click the one you want", width / 2, 6, height, 0.42);
-  paintSign(ctx, "Gym", decks.gym.x + decks.gym.w / 2, Math.max(28, decks.gym.y + decks.gym.h * 0.04), decks.gym.h, 0.55);
-  paintSign(ctx, "Arcade", decks.arcade.x + decks.arcade.w / 2, Math.max(28, decks.arcade.y + decks.arcade.h * 0.04), decks.arcade.h, 0.55);
+  paintSign(ctx, "Click the one you want", width / 2, 6, height, 0.42, "dark");
+  paintSign(ctx, "Gym", decks.gym.x + decks.gym.w / 2, Math.max(28, decks.gym.y + decks.gym.h * 0.04), decks.gym.h, 0.55, "dark");
+  paintSign(ctx, "Arcade", decks.arcade.x + decks.arcade.w / 2, Math.max(28, decks.arcade.y + decks.arcade.h * 0.04), decks.arcade.h, 0.55, "dark");
   const layout = deck === "arcade" ? decks.arcade : decks.gym;
   const active = gear !== "" && now < until;
   const elapsed = active ? GYM_MS - (until - now) : 0;

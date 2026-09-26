@@ -455,6 +455,11 @@
   box-shadow: 6px 6px 0 #111111;
 }
 
+.rad-arcade-wide {
+  width: min(520px, 96%);
+  top: 4%;
+}
+
 .rad-arcade-title {
   margin: 0;
   width: 100%;
@@ -477,6 +482,10 @@
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+.rad-arcade button {
+  width: 100%;
 }
 
 .rad-trip {

@@ -444,7 +444,7 @@ export function paintRink(
   if (fitting && rows && crack <= 0) {
     ctx.fillStyle = "rgba(8,4,14,0.62)";
     ctx.fillRect(0, 0, width, height);
-    const friendScale = Math.max(6, Math.round(Math.min(width, height) / 12));
+    const friendScale = Math.max(3, Math.round(Math.min(width, height) / 24));
     const originX = Math.round(width / 2 - 8 * friendScale);
     const originY = Math.round(height / 2 - 8 * friendScale);
     const bob = reduced ? 0 : Math.round(Math.sin(now / 160) * friendScale * 0.35);
@@ -570,9 +570,9 @@ export function paintStudio(
     ctx.imageSmoothingEnabled = smoothing;
   }
   if (!rows) return;
-  const centerX = layout.x + layout.w * 0.613;
+  const centerX = layout.x + layout.w * 0.648;
   const centerY = layout.y + layout.h * 0.364;
-  const shot = Math.max(1, Math.round((layout.h * 0.33 / 16) * 0.375));
+  const shot = Math.max(1, Math.round((layout.h * 0.33 / 16) * 0.84375));
   ctx.save();
   ctx.translate(centerX, centerY);
   ctx.scale(1, 0.62);

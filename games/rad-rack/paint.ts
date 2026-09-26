@@ -131,12 +131,34 @@ export function paintFriend(
   rows: readonly string[],
   worn: readonly Look[],
   restRows?: readonly string[] | null,
+  stride = 0,
 ) {
   const bob = restRows ? Math.round(clothDelta(rows, restRows) * scale) : 0;
+  let minX = 16;
+  let maxX = 0;
+  let maxY = 0;
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x += 1) {
+      if (row[x] !== "#") continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  });
+  const mid = (minX + maxX) / 2;
+  const legTop = maxY - 3;
+  const step = (x: number, y: number) => {
+    if (!stride || y < legTop) return { x, y };
+    const left = x <= mid;
+    const lead = stride > 0 ? left : !left;
+    if (lead) return { x: x + (left ? -1 : 1), y: y + 1 };
+    return { x, y: y - 1 };
+  };
   const blit = (pixels: readonly LookPixel[], dy: number) => {
     for (const [x, y, color] of pixels) {
+      const at = step(x, y);
       ctx.fillStyle = color;
-      ctx.fillRect(originX + x * scale, originY + y * scale + dy, scale, scale);
+      ctx.fillRect(originX + at.x * scale, originY + at.y * scale + dy, scale, scale);
     }
   };
 
@@ -144,7 +166,8 @@ export function paintFriend(
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x += 1) {
       if (row[x] !== "#") continue;
-      ctx.fillRect(originX + (x - 1) * scale, originY + (y - 1) * scale, scale * 3, scale * 3);
+      const at = step(x, y);
+      ctx.fillRect(originX + (at.x - 1) * scale, originY + (at.y - 1) * scale, scale * 3, scale * 3);
     }
   });
 
@@ -564,6 +587,7 @@ export function paintBowl(
   worn: readonly Look[],
   place: { nx: number; ny: number },
   restRows?: readonly string[] | null,
+  stride = 0,
 ) {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
@@ -583,7 +607,7 @@ export function paintBowl(
   ctx.beginPath();
   ctx.ellipse(footX, footY, scale * 6, scale * 1.4, 0, 0, Math.PI * 2);
   ctx.fill();
-  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale, scale, rows, worn, restRows);
+  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale, scale, rows, worn, restRows, stride);
 }
 
 export type Snack = {
@@ -972,6 +996,7 @@ export function paintLane(
   frames: readonly BowlFrame[] = [],
   reveal = 0,
   restRows?: readonly string[] | null,
+  stride = 0,
 ) {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
@@ -1004,7 +1029,7 @@ export function paintLane(
   ctx.beginPath();
   ctx.ellipse(footX, footY, scale * 6, scale * 1.4, 0, 0, Math.PI * 2);
   ctx.fill();
-  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale, scale, rows, worn, restRows);
+  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale, scale, rows, worn, restRows, stride);
   const radius = Math.max(5, scale * 2.4) * (1 - Math.min(1, roll) * 0.5);
   const startX = footX - scale * 2;
   const startY = footY - scale * 10;
@@ -1091,7 +1116,7 @@ export function paintStage(
   ctx.beginPath();
   ctx.ellipse(footX, footY + bob, 6 * scale, 1.4 * scale, 0, 0, Math.PI * 2);
   ctx.fill();
-  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale + bob, scale, rows, worn, restRows);
+  paintFriend(ctx, footX - 8 * scale, footY - 16 * scale + bob, scale, rows, worn, restRows, walking && !reducedMotion ? (Math.floor(time / 160) % 2 === 0 ? 1 : -1) : 0);
 }
 
 export function paintSign(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, roomH: number, scale = 1, plate: "light" | "dark" = "light") {

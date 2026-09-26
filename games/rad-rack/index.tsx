@@ -13,7 +13,7 @@ import { ArcadePlay, MazePlay, RcPlay, TripWorld } from "./arcade-play";
 import { CubePlay } from "./cube-play";
 import { TAPES, createClubMusic, type ClubMusic } from "./music";
 import { BALLS, SNACKS, ballById, addBowlRoll, bowlCard, bowlDone, bowlLaneHit, bowlPoint, bowlSnackHit, lanePoint, outfitZoom, paintBowl, paintLane, paintSnack, paintStage, pinsForAim, wardrobeHit, weeklyRareBall, WARDROBE_CURTAIN, type BowlFrame } from "./paint";
-import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
+import { MASKS, maskById, paintPhoto, paintPortrait, paintRink, paintStudio, paintUnder, photoBoothHit, photoPoint, rinkBoothHit, rinkSpot, SKATES, skateById, weeklyRare, weeklyRareMask } from "./rink";
 import { sampleFriendSprites } from "./samples";
 import infoTabUrl from "./art/info-tab.png";
 import topMarkUrl from "./art/top-mark.jpg";
@@ -53,6 +53,9 @@ type Live = {
   gymAim: { nx: number; ny: number } | null;
   bowlSpot: { nx: number; ny: number };
   bowlAim: { nx: number; ny: number } | null;
+  photoSpot: { nx: number; ny: number };
+  photoAim: { nx: number; ny: number } | null;
+  prints: { mask: number; worn: typeof LOOKS }[];
   deck: "gym" | "arcade";
   deckBlend: number;
   wander: number;
@@ -175,6 +178,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     gymAim: null,
     bowlSpot: { nx: 0.36, ny: 0.64 },
     bowlAim: null,
+    photoSpot: { nx: 0.46, ny: 0.66 },
+    photoAim: null,
+    prints: [],
     deck: "gym",
     deckBlend: 0,
     wander: 0,
@@ -469,6 +475,33 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           if (dist < 0.03) state.bowlAim = null;
           }
         }
+      } else if (state.room === "photo" && state.boothUntil <= now) {
+        const spot = state.photoSpot;
+        const aim = state.photoAim;
+        if (dir !== 0 || vert !== 0) {
+          state.photoAim = null;
+          spot.nx = Math.min(0.68, Math.max(0.34, spot.nx + dir * 0.22 * dt));
+          spot.ny = Math.min(0.76, Math.max(0.56, spot.ny + vert * 0.22 * dt));
+          walking = true;
+        } else if (aim) {
+          if (state.reduced) {
+            spot.nx = aim.nx;
+            spot.ny = aim.ny;
+            state.photoAim = null;
+          } else {
+            const dx = aim.nx - spot.nx;
+            const dy = aim.ny - spot.ny;
+            const dist = Math.hypot(dx, dy);
+            const step = Math.min(dist, 0.28 * dt);
+            if (dist > 0.001) {
+              spot.nx += (dx / dist) * step;
+              spot.ny += (dy / dist) * step;
+            }
+            if (Math.abs(dx) > 0.01) state.side = dx < 0 ? "left" : "right";
+            walking = dist > 0.02;
+            if (dist < 0.03) state.photoAim = null;
+          }
+        }
       } else if (state.room === "gym") {
         const targetBlend = state.deck === "arcade" ? 1 : 0;
         state.deckBlend += (targetBlend - state.deckBlend) * Math.min(1, dt * 3.2);
@@ -532,6 +565,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       const friendRows = same
         ? spriteFrame(same, "down", walking && !state.reduced, state.reduced ? 0 : frameIndex, "right").frame.rows
         : null;
+      const stride = walking && !state.reduced && state.room !== "rink" ? (Math.floor(now / 160) % 2 === 0 ? 1 : -1) : 0;
       if (state.room === "club") {
         paintClub(context, width, height, friendRows, state.worn, state.floor, state.move, beat, state.reduced, now, walking, restRows);
       } else if (state.room === "rink") {
@@ -542,18 +576,17 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       } else if (state.room === "photo") {
         if (state.boothUntil > 0 && now >= state.boothUntil) {
           state.boothUntil = 0;
-          state.cross("out", true);
+          setStudio(false);
         } else if (state.boothUntil > now) {
-          const shot = maskById(state.shotMask);
-          paintStudio(context, width, height, restRows ?? friendRows, state.worn, shot, restRows);
+          paintStudio(context, width, height, restRows ?? friendRows, state.prints.map((print) => ({ worn: print.worn, mask: maskById(print.mask) })), restRows);
         } else {
           const shot = state.shotMask > 0 && now >= state.shotReady ? maskById(state.shotMask) : null;
-          paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows);
+          paintPhoto(context, width, height, friendRows, state.worn, maskById(state.mask), outfitZoom(now, state.maskUntil), shot, restRows, stride, state.photoSpot);
         }
       } else if (state.room === "gym") {
-        paintGym(context, width, height, friendRows, state.worn, state.gymAct, gloveById(state.glove), state.gymSpot, state.deck, state.deckBlend, now, state.gymUntil, state.reduced, restRows);
+        paintGym(context, width, height, friendRows, state.worn, state.gymAct, gloveById(state.glove), state.gymSpot, state.deck, state.deckBlend, now, state.gymUntil, state.reduced, restRows, stride);
       } else if (state.room === "bowl") {
-        paintBowl(context, width, height, friendRows, state.worn, state.bowlSpot, restRows);
+        paintBowl(context, width, height, friendRows, state.worn, state.bowlSpot, restRows, stride);
       } else if (state.room === "lane") {
         const roll = state.rollStart > 0 ? Math.min(1, (now - state.rollStart) / 900) : 0;
         if (state.rollStart > 0 && !state.rollHit && now - state.rollStart >= 860) {
@@ -572,7 +605,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           window.setTimeout(() => setCaption((current) => (current === text ? "" : current)), 1400);
         }
         const reveal = state.rollStart > 0 ? now - state.rollStart : 0;
-        paintLane(context, width, height, friendRows, state.worn, ballById(state.ball), roll, state.rollAim, state.frames, reveal, restRows);
+        paintLane(context, width, height, friendRows, state.worn, ballById(state.ball), roll, state.rollAim, state.frames, reveal, restRows, stride);
       } else if (state.room === "snack") {
         const left = state.snackUntil - now;
         const zoom = left <= 0 ? 0 : left > 400 ? 1 : left / 400;
@@ -1336,23 +1369,29 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
               }
             } else if (state.room === "photo") {
               if (state.boothUntil > performance.now()) return;
-              if (state.mask <= 0) {
-                note("Put a mask on first");
+              if (photoBoothHit(rect.width, rect.height, x, y)) {
+                if (state.mask <= 0) {
+                  note("Put a mask on first");
+                  return;
+                }
+                state.boothUntil = performance.now() + 5000;
+                state.shotMask = state.mask;
+                state.prints = [...state.prints, { mask: state.mask, worn: [...state.worn] }];
+                setStudio(true);
+                fx.current.play("snap");
+                setPhotos((list) => [
+                  ...list,
+                  { id: list.length + 1, mask: state.mask, worn: [...worn].sort((a, b) => a - b) },
+                ]);
+                if (!state.reduced) {
+                  setFlash(true);
+                  window.setTimeout(() => setFlash(false), 160);
+                }
+                note("Cheese");
                 return;
               }
-              state.boothUntil = performance.now() + 5000;
-              state.shotMask = state.mask;
-              setStudio(true);
-              fx.current.play("snap");
-              setPhotos((list) => [
-                ...list,
-                { id: list.length + 1, mask: state.mask, worn: [...worn].sort((a, b) => a - b) },
-              ]);
-              if (!state.reduced) {
-                setFlash(true);
-                window.setTimeout(() => setFlash(false), 160);
-              }
-              note("Cheese");
+              const spot = photoPoint(rect.width, rect.height, x, y);
+              if (spot) state.photoAim = spot;
             }
           }}
         />
@@ -1442,7 +1481,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
                     ? "Turn the faces until every side is one color. Solve it to get out, or spend 3 tokens."
                     : "Under the mall. The lights cannot all go out. Buy a token, then spend 3 to get back up."
               : room === "photo"
-                ? "Photo booth. Put a mask on, then tap the room. The picture projects on the floor."
+                ? "Photo booth. Tap the floor to walk. Tap the booth to shoot. The picture hits the wall, then you come back."
               : room === "gym"
                 ? "Click the gym or the arcade. The middle machines cost 1 token."
               : room === "bowl"
@@ -1575,7 +1614,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         <div className="rad-club-bar">
           <p className="rad-track">
             <strong>Photo booth</strong>
-            <span>Tap the room. The picture hits the board, then you leave.</span>
+            <span>Tap the floor to walk. Tap the booth to shoot.</span>
           </p>
           <button
             type="button"

@@ -1,4 +1,4 @@
-import { LOOKS, type Look } from "./looks";
+import type { Look } from "./looks";
 import { paintFriend, paintSign } from "./paint";
 import floorUrl from "./art/dance-neon.jpg";
 import gymUrl from "./art/gym-color-2.jpg";
@@ -187,7 +187,7 @@ function paintDancerAt(
   scale: number,
   move: number,
 ) {
-  const frame = FRAMES[0];
+  const frame = FRAMES[Math.floor(beat * 2 + crew.bias) % FRAMES.length] ?? FRAMES[0];
   const shift = danceOffset(move, beat, scale, reduced);
   const top = foot - 8 * scale + shift.y;
   const left = cx + shift.x;
@@ -491,18 +491,14 @@ export function paintClub(
   });
 
   const crowd = [
-    { nx: 0.28, ny: 0.66, worn: [LOOKS[0], LOOKS[2], LOOKS[4]] },
-    { nx: 0.4, ny: 0.74, worn: [LOOKS[3], LOOKS[5]] },
-    { nx: 0.55, ny: 0.64, worn: [LOOKS[1], LOOKS[6]] },
-    { nx: 0.66, ny: 0.74, worn: [LOOKS[4], LOOKS[7]] },
-    { nx: 0.34, ny: 0.58, worn: [LOOKS[0], LOOKS[5], LOOKS[9]] },
-    { nx: 0.5, ny: 0.7, worn: [LOOKS[2], LOOKS[3], LOOKS[8]] },
-    { nx: 0.72, ny: 0.66, worn: [LOOKS[1], LOOKS[6], LOOKS[7]] },
-  ].map((item) => ({
-    nx: item.nx,
-    ny: item.ny,
-    worn: item.worn.filter((look): look is Look => Boolean(look)),
-  }));
+    { crew: CREW[0], nx: 0.28, ny: 0.66 },
+    { crew: CREW[1], nx: 0.4, ny: 0.74 },
+    { crew: CREW[3], nx: 0.55, ny: 0.64 },
+    { crew: CREW[4], nx: 0.66, ny: 0.74 },
+    { crew: CREW[5], nx: 0.34, ny: 0.58 },
+    { crew: CREW[6], nx: 0.5, ny: 0.7 },
+    { crew: CREW[7], nx: 0.72, ny: 0.66 },
+  ].filter((item): item is { crew: Crew; nx: number; ny: number } => Boolean(item.crew));
 
   const friendSpot = spot(place.nx, place.ny);
   const shift = rows && !moving ? danceOffset(move, beat, friendScale, reduced) : { x: 0, y: 0 };
@@ -511,13 +507,7 @@ export function paintClub(
       y: spot(item.nx, item.ny).y,
       draw: () => {
         const at = spot(item.nx, item.ny);
-        const hop = danceOffset(move, beat, friendScale, reduced);
-        const footX = at.x + hop.x;
-        const footY = at.y + hop.y;
-        if (!rows) return;
-        ctx.fillStyle = "rgba(0,0,0,0.45)";
-        ctx.fillRect(footX - friendScale * 5, footY - friendScale * 0.3, friendScale * 10, Math.max(2, friendScale * 0.4));
-        paintFriend(ctx, footX - 8 * friendScale, footY - 16 * friendScale, friendScale, rows, item.worn, restRows);
+        paintDancerAt(ctx, item.crew, beat + item.crew.bias * 0.17, reduced, at.x, at.y, Math.max(friendScale + 1, Math.round(friendScale * 1.3)), item.crew.bias % 4);
       },
     }));
   if (rows) {
@@ -528,7 +518,7 @@ export function paintClub(
         const footY = friendSpot.y + shift.y;
         ctx.fillStyle = "rgba(0,0,0,0.45)";
         ctx.fillRect(footX - friendScale * 5, footY - friendScale * 0.3, friendScale * 10, Math.max(2, friendScale * 0.4));
-        paintFriend(ctx, footX - 8 * friendScale, footY - 16 * friendScale, friendScale, rows, worn, restRows);
+        paintFriend(ctx, footX - 8 * friendScale, footY - 16 * friendScale, friendScale, rows, worn, restRows, moving && !reduced ? (Math.floor(now / 160) % 2 === 0 ? 1 : -1) : 0);
       },
     });
   }
@@ -712,6 +702,7 @@ export function paintGym(
   until: number,
   reduced: boolean,
   restRows?: readonly string[] | null,
+  stride = 0,
 ) {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
@@ -762,7 +753,7 @@ export function paintGym(
   }
   const originX = footX - 8 * scale;
   const originY = footY - 16 * scale;
-  paintFriend(ctx, originX, originY, scale, rows, worn, restRows);
+  paintFriend(ctx, originX, originY, scale, rows, worn, restRows, lifting ? 0 : stride);
   paintGloves(ctx, originX, originY, scale, glove, press * 7);
   if (lifting) {
     const barY = footY - scale * (8 + press * 7);

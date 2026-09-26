@@ -555,8 +555,7 @@ export function paintStudio(
   width: number,
   height: number,
   rows: readonly string[] | null,
-  worn: readonly Look[],
-  mask: Mask,
+  prints: readonly { worn: readonly Look[]; mask: Mask }[],
   restRows?: readonly string[] | null,
 ) {
   ctx.fillStyle = "#000000";
@@ -569,16 +568,42 @@ export function paintStudio(
     ctx.drawImage(art, layout.x, layout.y, layout.w, layout.h);
     ctx.imageSmoothingEnabled = smoothing;
   }
-  if (!rows) return;
-  const centerX = layout.x + layout.w * 0.648;
-  const centerY = layout.y + layout.h * 0.364;
-  const shot = Math.max(1, Math.round((layout.h * 0.33 / 16) * 0.84375));
+  if (!rows || prints.length === 0) return;
+  const tl = {
+    x: layout.x + (783 / 1500) * layout.w,
+    y: layout.y + (72 / 1010) * layout.h,
+  };
+  const tr = {
+    x: layout.x + (1179 / 1500) * layout.w,
+    y: layout.y + (226 / 1010) * layout.h,
+  };
+  const bl = {
+    x: layout.x + (783 / 1500) * layout.w,
+    y: layout.y + (506 / 1010) * layout.h,
+  };
+  const centerX = (tl.x + tr.x) / 2;
+  const centerY = layout.y + (366 / 1010) * layout.h;
+  const across = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+  const rise = Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  const count = prints.length;
+  const cols = Math.ceil(Math.sqrt(count));
+  const lines = Math.ceil(count / cols);
+  const gap = Math.max(6, rise * 0.04);
+  const cellW = (across * 0.84 - gap * (cols - 1)) / cols;
+  const cellH = (rise * 0.8 - gap * (lines - 1)) / lines;
+  const fitted = Math.max(1, Math.floor(Math.min(cellW, cellH) / 18));
+  const shot = count === 1 ? Math.max(2, Math.round(rise / 40)) : Math.max(1, Math.min(fitted, Math.round(rise / 40)));
   ctx.save();
   ctx.translate(centerX, centerY);
-  ctx.scale(1, 0.62);
-  ctx.translate(-centerX, -centerY);
-  paintFriend(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, rows, worn, restRows);
-  paintMask(ctx, centerX - 8 * shot, centerY - 8 * shot, shot, mask);
+  ctx.transform((tr.x - tl.x) / across, (tr.y - tl.y) / across, (bl.x - tl.x) / rise, (bl.y - tl.y) / rise, 0, 0);
+  prints.forEach((print, index) => {
+    const col = index % cols;
+    const line = Math.floor(index / cols);
+    const x = -((cols - 1) * (cellW + gap)) / 2 + col * (cellW + gap);
+    const y = -((lines - 1) * (cellH + gap)) / 2 + line * (cellH + gap);
+    paintFriend(ctx, x - 8 * shot, y - 8 * shot, shot, rows, print.worn, restRows);
+    paintMask(ctx, x - 8 * shot, y - 8 * shot, shot, print.mask);
+  });
   ctx.restore();
 }
 
@@ -596,6 +621,24 @@ function photoLayout(width: number, height: number) {
   return { x: (width - w) / 2, y: (height - h) / 2, w, h };
 }
 
+export function photoPoint(width: number, height: number, x: number, y: number): { nx: number; ny: number } | null {
+  const layout = photoLayout(width, height);
+  const nx = (x - layout.x) / layout.w;
+  const ny = (y - layout.y) / layout.h;
+  if (nx < 0.3 || nx > 0.72 || ny < 0.54 || ny > 0.8) return null;
+  return {
+    nx: Math.min(0.68, Math.max(0.34, nx)),
+    ny: Math.min(0.76, Math.max(0.56, ny)),
+  };
+}
+
+export function photoBoothHit(width: number, height: number, x: number, y: number) {
+  const layout = photoLayout(width, height);
+  const nx = (x - layout.x) / layout.w;
+  const ny = (y - layout.y) / layout.h;
+  return nx > 0.4 && nx < 0.58 && ny > 0.18 && ny < 0.56;
+}
+
 export function paintPhoto(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -606,6 +649,8 @@ export function paintPhoto(
   zoom = 0,
   projection: Mask | null = null,
   restRows?: readonly string[] | null,
+  stride = 0,
+  place: { nx: number; ny: number } = { nx: 0.46, ny: 0.66 },
 ) {
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, width, height);
@@ -623,8 +668,8 @@ export function paintPhoto(
   const peak = Math.max(friendScale + 1, Math.round(Math.min(width, height) / 68));
   const eased = zoom * zoom * (3 - 2 * zoom);
   const scale = friendScale + (peak - friendScale) * eased;
-  const homeX = layout.x + layout.w * 0.46;
-  const homeY = layout.y + layout.h * 0.62;
+  const homeX = layout.x + place.nx * layout.w;
+  const homeY = layout.y + place.ny * layout.h;
   const footX = homeX + (width / 2 - homeX) * eased;
   const footY = homeY + (height * 0.56 - homeY) * eased;
   if (eased > 0.04) {
@@ -633,18 +678,19 @@ export function paintPhoto(
   }
   const originX = footX - 8 * scale;
   const originY = footY - 16 * scale;
-  paintFriend(ctx, originX, originY, scale, rows, worn, restRows);
+  paintFriend(ctx, originX, originY, scale, rows, worn, restRows, zoom > 0.04 ? 0 : stride);
   paintMask(ctx, originX, originY, scale, mask);
   if (zoom > 0.04 || !projection || !rows) return;
-  const px = homeX;
-  const py = homeY + layout.h * 0.1;
+  const still = restRows ?? rows;
+  const px = layout.x + layout.w * 0.5;
+  const py = layout.y + layout.h * 0.72;
   ctx.save();
   ctx.globalAlpha = 0.28;
   ctx.fillStyle = "#39f2e4";
   ctx.beginPath();
   ctx.moveTo(layout.x + layout.w * 0.5, layout.y + layout.h * 0.2);
-  ctx.lineTo(px - layout.w * 0.06, py - layout.h * 0.02);
-  ctx.lineTo(px + layout.w * 0.06, py + layout.h * 0.04);
+  ctx.lineTo(px - layout.w * 0.1, py - layout.h * 0.03);
+  ctx.lineTo(px + layout.w * 0.1, py + layout.h * 0.06);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -652,12 +698,12 @@ export function paintPhoto(
   ctx.translate(px, py);
   ctx.transform(1, 0.12, -0.15, 0.38, 0, 0);
   ctx.fillStyle = "rgba(244,236,223,0.92)";
-  ctx.fillRect(-36, -46, 72, 78);
+  ctx.fillRect(-60, -76, 120, 130);
   ctx.strokeStyle = "#141018";
   ctx.lineWidth = 2;
-  ctx.strokeRect(-36, -46, 72, 78);
-  const shot = Math.max(2, Math.round(3));
-  paintFriend(ctx, -8 * shot, -8 * shot, shot, rows, worn, restRows);
+  ctx.strokeRect(-60, -76, 120, 130);
+  const shot = Math.max(3, Math.round(5));
+  paintFriend(ctx, -8 * shot, -8 * shot, shot, still, worn, restRows);
   paintMask(ctx, -8 * shot, -8 * shot, shot, projection);
   ctx.restore();
 }

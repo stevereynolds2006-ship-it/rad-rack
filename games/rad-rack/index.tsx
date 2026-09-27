@@ -109,7 +109,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [panel, setPanel] = useState<Panel>(null);
   const [revealId, setRevealId] = useState<number | null>(null);
   const [worn, setWorn] = useState<ReadonlySet<number>>(() => new Set());
-  const [muted, setMuted] = useState(true);
+  const [muted, setMuted] = useState(false);
   const [motionPref, setMotionPref] = useState(false);
   const [motionOverride, setMotionOverride] = useState<boolean | null>(null);
   const [caption, setCaption] = useState("");
@@ -206,7 +206,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     side: "right",
     room: "rack",
     move: 0,
-    muted: true,
+    muted: false,
     skate: 0.4,
     quad: 0,
     mask: 0,
@@ -259,7 +259,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setBusy(false);
     setPanel(null);
     setRevealId(null);
-    setMuted(true);
     setRoom("rack");
     setMove(0);
     setEquipped(0);
@@ -283,7 +282,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     live.current.latched = false;
     live.current.shotMask = -1;
     live.current.maskUntil = 0;
-    music.current?.stop();
     void client
       .read()
       .then((value) => {

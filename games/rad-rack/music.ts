@@ -29,20 +29,30 @@ export function createClubMusic(): ClubMusic {
   audio.loop = true;
   audio.preload = "auto";
   audio.volume = 0.9;
-  let muted = true;
+  let muted = false;
   let playing = false;
   let index = 0;
   let bpm: number = TAPES[0].bpm;
 
   function play() {
-    if (muted || playing) return;
-    playing = true;
+    if (muted) return;
+    if (!audio.paused) {
+      playing = true;
+      return;
+    }
     audio.muted = false;
     audio.volume = 0.9;
-    void audio.play().catch(() => {
+    void audio.play().then(() => {
+      playing = true;
+    }).catch(() => {
       playing = false;
     });
   }
+
+  audio.autoplay = true;
+  const kick = window.setInterval(play, 500);
+  audio.addEventListener("canplay", play);
+  play();
 
   return {
     unlock() {
@@ -84,6 +94,7 @@ export function createClubMusic(): ClubMusic {
       return (performance.now() / 1000) * (bpm / 60);
     },
     dispose() {
+      window.clearInterval(kick);
       playing = false;
       audio.pause();
       audio.src = "";

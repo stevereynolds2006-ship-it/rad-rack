@@ -1,2 +1,15 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rad Rack</title><link rel="stylesheet" href="./runtime.css"><link rel="stylesheet" href="./layout.css"></head><body><main id="root"></main><script src="./runtime.js"></script></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rad Rack</title><link rel="stylesheet" href="./runtime.css"><link rel="stylesheet" href="./layout.css"></head><body><main id="root"></main><script>
+window.addEventListener("message",function(event){
+  var data=event.data;
+  if(!data||typeof data.friendId!=="string"||!/^\d+$/.test(data.friendId))return;
+  var key="rad-rack:"+data.friendId;
+  if(data.type==="rad-rack:load"){
+    var save=null;
+    try{save=localStorage.getItem(key)}catch(e){}
+    if(event.source)event.source.postMessage({type:"rad-rack:saved",friendId:data.friendId,save:save},"*");
+  }else if(data.type==="rad-rack:save"&&typeof data.save==="string"&&data.save.length<200000){
+    try{localStorage.setItem(key,data.save)}catch(e){}
+  }
+});
+</script><script src="./runtime.js"></script></body></html>

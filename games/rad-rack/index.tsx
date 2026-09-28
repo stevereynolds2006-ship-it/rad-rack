@@ -37,6 +37,137 @@ type Panel = "odds" | "reveal" | "desk" | null;
 type Room = "rack" | "club" | "rink" | "under" | "photo" | "gym" | "bowl" | "lane" | "snack";
 type SavedPhoto = { id: number; mask: number; worn: number[] };
 
+type RackSave = {
+  worn: number[];
+  looks: number[];
+  lookSpent: string;
+  skates: number[];
+  skate: number;
+  skateSpent: string;
+  masks: number[];
+  mask: number;
+  maskSpent: string;
+  gloves: number[];
+  glove: number;
+  gloveSpent: string;
+  balls: number[];
+  ball: number;
+  ballSpent: string;
+  snackSpent: string;
+  burned: string;
+  photos: SavedPhoto[];
+  tape: number;
+};
+
+const emptySave = (): RackSave => ({
+  worn: [],
+  looks: [],
+  lookSpent: "0",
+  skates: [0],
+  skate: 0,
+  skateSpent: "0",
+  masks: [0],
+  mask: 0,
+  maskSpent: "0",
+  gloves: [0],
+  glove: 0,
+  gloveSpent: "0",
+  balls: [0],
+  ball: 0,
+  ballSpent: "0",
+  snackSpent: "0",
+  burned: "0",
+  photos: [],
+  tape: 0,
+});
+
+function wholeNumbers(value: unknown, extras: number[] = []): number[] {
+  const found = Array.isArray(value) ? value.filter((item) => Number.isInteger(item) && item >= 0) : [];
+  return [...new Set([...extras, ...found])];
+}
+
+function coinText(value: unknown): string {
+  return typeof value === "string" && /^\d+$/.test(value) ? value : "0";
+}
+
+function photosOf(value: unknown): SavedPhoto[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const photo = item as Partial<SavedPhoto>;
+    if (!Number.isInteger(photo.id) || !Number.isInteger(photo.mask) || !Array.isArray(photo.worn)) return [];
+    return [{ id: photo.id, mask: photo.mask, worn: photo.worn.filter((id) => Number.isInteger(id)) }];
+  });
+}
+
+function parseSave(raw: string | null): RackSave | null {
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(raw) as Partial<RackSave>;
+    const blank = emptySave();
+    return {
+      worn: wholeNumbers(data.worn),
+      looks: wholeNumbers(data.looks),
+      lookSpent: coinText(data.lookSpent),
+      skates: wholeNumbers(data.skates, [0]),
+      skate: Number.isInteger(data.skate) ? data.skate : 0,
+      skateSpent: coinText(data.skateSpent),
+      masks: wholeNumbers(data.masks, [0]),
+      mask: Number.isInteger(data.mask) ? data.mask : 0,
+      maskSpent: coinText(data.maskSpent),
+      gloves: wholeNumbers(data.gloves, [0]),
+      glove: Number.isInteger(data.glove) ? data.glove : 0,
+      gloveSpent: coinText(data.gloveSpent),
+      balls: wholeNumbers(data.balls, [0]),
+      ball: Number.isInteger(data.ball) ? data.ball : 0,
+      ballSpent: coinText(data.ballSpent),
+      snackSpent: coinText(data.snackSpent),
+      burned: coinText(data.burned),
+      photos: photosOf(data.photos),
+      tape: Number.isInteger(data.tape) ? data.tape : blank.tape,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadRack(friendId: bigint): Promise<RackSave | null> {
+  const id = friendId.toString();
+  const local = () => {
+    try {
+      return parseSave(localStorage.getItem(`rad-rack:${id}`));
+    } catch {
+      return null;
+    }
+  };
+  if (window.parent === window) return Promise.resolve(local());
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      resolve(local());
+    }, 500);
+    function onMessage(event: MessageEvent) {
+      const data = event.data as { type?: string; friendId?: string; save?: string | null };
+      if (!data || data.type !== "rad-rack:saved" || data.friendId !== id) return;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      resolve(parseSave(typeof data.save === "string" ? data.save : null) ?? local());
+    }
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage({ type: "rad-rack:load", friendId: id }, "*");
+  });
+}
+
+function storeRack(friendId: bigint, save: RackSave) {
+  const raw = JSON.stringify(save);
+  try {
+    localStorage.setItem(`rad-rack:${friendId.toString()}`, raw);
+  } catch {
+    /* The sandboxed frame may not keep storage. The parent page does. */
+  }
+  if (window.parent !== window) window.parent.postMessage({ type: "rad-rack:save", friendId: friendId.toString(), save: raw }, "*");
+}
+
 type Live = {
   paused: boolean;
   reduced: boolean;
@@ -159,6 +290,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const locked = useRef(false);
   const epoch = useRef(0);
   const heard = useRef(false);
+  const skipSave = useRef(true);
   const buyLookRef = useRef<(index: number) => void>(() => {});
   const reduced = motionOverride ?? motionPref;
   const wornLooks = [...worn].sort((a, b) => a - b).map((id) => lookById(id));
@@ -261,16 +393,6 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setRevealId(null);
     setRoom("rack");
     setMove(0);
-    setEquipped(0);
-    setOwnedSkates(new Set([0]));
-    setSkateSpent(0n);
-    setOwnedMasks(new Set([0]));
-    setMask(0);
-    setMaskSpent(0n);
-    setOwnedGloves(new Set([0]));
-    setGlove(0);
-    setGloveSpent(0n);
-    setPhotos([]);
     setViewPhoto(null);
     locked.current = false;
     live.current.room = "rack";
@@ -282,6 +404,36 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     live.current.latched = false;
     live.current.shotMask = -1;
     live.current.maskUntil = 0;
+    skipSave.current = true;
+    let cancel = false;
+    void loadRack(friendId).then((loaded) => {
+      if (cancel || version !== epoch.current) return;
+      const save = loaded ?? emptySave();
+      setWorn(new Set(save.worn));
+      setOwnedLooks(new Set(save.looks));
+      setLookSpent(BigInt(save.lookSpent));
+      setOwnedSkates(new Set(save.skates));
+      setEquipped(save.skate);
+      setSkateSpent(BigInt(save.skateSpent));
+      setOwnedMasks(new Set(save.masks));
+      setMask(save.mask);
+      setMaskSpent(BigInt(save.maskSpent));
+      setOwnedGloves(new Set(save.gloves));
+      setGlove(save.glove);
+      setGloveSpent(BigInt(save.gloveSpent));
+      setOwnedBalls(new Set(save.balls));
+      setBall(save.ball);
+      setBallSpent(BigInt(save.ballSpent));
+      setSnackSpent(BigInt(save.snackSpent));
+      setBurned(BigInt(save.burned));
+      setPhotos(save.photos);
+      setTape(save.tape);
+      live.current.prints = save.photos.map((photo) => ({ mask: photo.mask, worn: photo.worn.map((id) => lookById(id)) }));
+      live.current.glove = save.glove;
+      live.current.ball = save.ball;
+      live.current.mask = save.mask;
+      skipSave.current = false;
+    });
     void client
       .read()
       .then((value) => {
@@ -293,11 +445,58 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
         }
       });
     return () => {
+      cancel = true;
       epoch.current += 1;
       sound.current?.dispose();
       sound.current = null;
     };
   }, [client, friendId]);
+
+  useEffect(() => {
+    if (skipSave.current) return;
+    storeRack(friendId, {
+      worn: [...worn],
+      looks: [...ownedLooks],
+      lookSpent: lookSpent.toString(),
+      skates: [...ownedSkates],
+      skate: equipped,
+      skateSpent: skateSpent.toString(),
+      masks: [...ownedMasks],
+      mask,
+      maskSpent: maskSpent.toString(),
+      gloves: [...ownedGloves],
+      glove,
+      gloveSpent: gloveSpent.toString(),
+      balls: [...ownedBalls],
+      ball,
+      ballSpent: ballSpent.toString(),
+      snackSpent: snackSpent.toString(),
+      burned: burned.toString(),
+      photos,
+      tape,
+    });
+  }, [
+    friendId,
+    worn,
+    ownedLooks,
+    lookSpent,
+    ownedSkates,
+    equipped,
+    skateSpent,
+    ownedMasks,
+    mask,
+    maskSpent,
+    ownedGloves,
+    glove,
+    gloveSpent,
+    ownedBalls,
+    ball,
+    ballSpent,
+    snackSpent,
+    burned,
+    photos,
+    tape,
+  ]);
 
   useEffect(() => {
     const track = createClubMusic();

@@ -15,7 +15,7 @@ window.addEventListener("message",function(event){
     return;
   }
   var RF="0x0779369854d3EcdEA927206718FFD7730C67B71f";
-  var BURN="000000000000000000000000000000000000dead";
+  var GAME="b7823b2e28484382aa70952a7818712e8ac42a72";
   function pad(value){return value.replace(/^0x/i,"").toLowerCase().padStart(64,"0");}
   function reply(message){event.source.postMessage(message,"*");}
   async function wallet(prompt){
@@ -45,7 +45,7 @@ window.addEventListener("message",function(event){
     var value=BigInt(data.amount);
     if(value<1n||value>max){reply({type:"rad-rack:spent",id:data.id,error:"That RF amount is not allowed."});return;}
     wallet(true).then(function(ready){
-      var call="0xa9059cbb"+pad(BURN)+pad(value.toString(16));
+      var call="0xa9059cbb"+pad(GAME)+pad(value.toString(16));
       return ready.eth.request({method:"eth_sendTransaction",params:[{from:ready.account,to:RF,data:call}]});
     }).then(function(hash){
       reply({type:"rad-rack:spent",id:data.id,hash:hash});

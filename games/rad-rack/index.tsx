@@ -1547,7 +1547,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
           </div>
           <div className="rad-meters">
             <span>{snapshot ? rf(purse) : "…"}</span>
-            <span>Burned {rf(burned)}</span>
+            <span>Sent {rf(burned)}</span>
             {lastBurn ? <span>Spent {lastBurn}</span> : null}
             <span>{snapshot ? `${snapshot.consumables.toString()} ${snapshot.consumables === 1n ? "token" : "tokens"}` : ""}</span>
           </div>

@@ -168,6 +168,41 @@ function storeRack(friendId: bigint, save: RackSave) {
   if (window.parent !== window) window.parent.postMessage({ type: "rad-rack:save", friendId: friendId.toString(), save: raw }, "*");
 }
 
+function askParent<T>(type: string, fields: Record<string, string>, reply: string): Promise<T> {
+  if (window.parent === window) return Promise.reject(new Error("Open the published game page to spend RF."));
+  const id = `${type}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      reject(new Error("The wallet did not answer. Confirm the transaction or try again."));
+    }, 120000);
+    function onMessage(event: MessageEvent) {
+      const data = event.data as { type?: string; id?: string; error?: string };
+      if (!data || data.type !== reply || data.id !== id) return;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", onMessage);
+      if (typeof data.error === "string") reject(new Error(data.error));
+      else resolve(data as T);
+    }
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage({ type, id, ...fields }, "*");
+  });
+}
+
+function readWalletRF(): Promise<bigint | null> {
+  return askParent<{ amount?: string }>("rad-rack:balance", {}, "rad-rack:balance")
+    .then((data) => (typeof data.amount === "string" && /^\d+$/.test(data.amount) ? BigInt(data.amount) : null))
+    .catch(() => null);
+}
+
+function spendRF(amount: bigint): Promise<string> {
+  if (amount <= 0n) return Promise.resolve("");
+  return askParent<{ hash?: string }>("rad-rack:spend", { amount: amount.toString() }, "rad-rack:spent").then((data) => {
+    if (typeof data.hash !== "string" || !data.hash.startsWith("0x")) throw new Error("The RF transfer was not confirmed.");
+    return data.hash;
+  });
+}
+
 type Live = {
   paused: boolean;
   reduced: boolean;
@@ -279,6 +314,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const [venue, setVenue] = useState<"gym" | "arcade">("gym");
   const [laps, setLaps] = useState(0);
   const [lights, setLights] = useState<readonly boolean[]>([true, false, false]);
+  const [chainRF, setChainRF] = useState<bigint | null>(null);
   useEffect(() => {
     setInfoOpen(true);
   }, [room]);
@@ -451,6 +487,21 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       sound.current = null;
     };
   }, [client, friendId]);
+
+  useEffect(() => {
+    let stop = false;
+    const pull = () => {
+      void readWalletRF().then((value) => {
+        if (!stop && value !== null) setChainRF(value);
+      });
+    };
+    pull();
+    const timer = window.setInterval(pull, 15000);
+    return () => {
+      stop = true;
+      window.clearInterval(timer);
+    };
+  }, [friendId]);
 
   useEffect(() => {
     if (skipSave.current) return;
@@ -882,11 +933,16 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     };
   }, []);
 
-  function burnCoin(amount: bigint) {
-    if (amount < 2n) return;
-    const half = amount / 2n;
-    setBurned((total) => total + half);
-    setLastBurn(rf(half));
+  async function payRF(amount: bigint) {
+    if (amount <= 0n) return;
+    if (chainRF !== null && chainRF < amount) throw new Error("Not enough RF in your wallet.");
+    note("Confirm the RF transfer in your wallet");
+    await spendRF(amount);
+    setChainRF((current) => (current !== null && current > amount ? current - amount : current === null ? null : 0n));
+    const next = await readWalletRF();
+    if (next !== null) setChainRF(next);
+    setBurned((total) => total + amount);
+    setLastBurn(rf(amount));
   }
 
   function burnToken(count: bigint) {
@@ -911,14 +967,15 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough RF for those skates");
       return;
     }
-    setSkateSpent((spent) => spent + skate.price);
-    burnCoin(skate.price);
-    setOwnedSkates((owned) => new Set(owned).add(id));
-    setEquipped(id);
-    live.current.quad = id;
-    if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
-    note(`${skate.name} bought. Burned ${rf(skate.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(skate.price);
+      setOwnedSkates((owned) => new Set(owned).add(id));
+      setEquipped(id);
+      live.current.quad = id;
+      if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
+      note(`${skate.name} bought. Sent ${rf(skate.price)}`);
+      fx.current.play("buy");
+    });
   }
 
   function buyMask(id: number) {
@@ -936,13 +993,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough RF for that mask");
       return;
     }
-    setMaskSpent((spent) => spent + item.price);
-    burnCoin(item.price);
-    setOwnedMasks((owned) => new Set(owned).add(id));
-    setMask(id);
-    live.current.mask = id;
-    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(item.price);
+      setOwnedMasks((owned) => new Set(owned).add(id));
+      setMask(id);
+      live.current.mask = id;
+      note(`${item.name} bought. Sent ${rf(item.price)}`);
+      fx.current.play("buy");
+    });
   }
 
   function buyGlove(id: number) {
@@ -960,13 +1018,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough RF for those gloves");
       return;
     }
-    setGloveSpent((spent) => spent + item.price);
-    burnCoin(item.price);
-    setOwnedGloves((owned) => new Set(owned).add(id));
-    setGlove(id);
-    live.current.glove = id;
-    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(item.price);
+      setOwnedGloves((owned) => new Set(owned).add(id));
+      setGlove(id);
+      live.current.glove = id;
+      note(`${item.name} bought. Sent ${rf(item.price)}`);
+      fx.current.play("buy");
+    });
   }
 
   function buyBall(id: number) {
@@ -984,13 +1043,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough RF for that ball");
       return;
     }
-    setBallSpent((spent) => spent + item.price);
-    burnCoin(item.price);
-    setOwnedBalls((owned) => new Set(owned).add(id));
-    setBall(id);
-    live.current.ball = id;
-    note(`${item.name} bought. Burned ${rf(item.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(item.price);
+      setOwnedBalls((owned) => new Set(owned).add(id));
+      setBall(id);
+      live.current.ball = id;
+      note(`${item.name} bought. Sent ${rf(item.price)}`);
+      fx.current.play("buy");
+    });
   }
 
   function buySnack(id: number) {
@@ -1000,13 +1060,14 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough RF for that snack");
       return;
     }
-    setSnackSpent((spent) => spent + item.price);
-    burnCoin(item.price);
-    setSnackId(id);
-    live.current.snackId = id;
-    live.current.snackUntil = performance.now() + 2000;
-    note(`${item.name}. Burned ${rf(item.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(item.price);
+      setSnackId(id);
+      live.current.snackId = id;
+      live.current.snackUntil = performance.now() + 2000;
+      note(`${item.name}. Sent ${rf(item.price)}`);
+      fx.current.play("buy");
+    });
   }
 
   function unlock() {
@@ -1255,14 +1316,15 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       note("Not enough rare coins in your wallet");
       return;
     }
-    setLookSpent((spent) => spent + look.price);
-    burnCoin(look.price);
-    setOwnedLooks((owned) => new Set(owned).add(index));
-    setWorn((current) => new Set(current).add(index));
-    live.current.worn = [...worn].concat(index).sort((a, b) => a - b).map((id) => lookById(id));
-    live.current.outfitUntil = performance.now() + 1800;
-    note(`${look.name} bought. Burned ${rf(look.price / 2n)}`);
-    fx.current.play("buy");
+    void act(async () => {
+      await payRF(look.price);
+      setOwnedLooks((owned) => new Set(owned).add(index));
+      setWorn((current) => new Set(current).add(index));
+      live.current.worn = [...worn].concat(index).sort((a, b) => a - b).map((id) => lookById(id));
+      live.current.outfitUntil = performance.now() + 1800;
+      note(`${look.name} bought. Sent ${rf(look.price)}`);
+      fx.current.play("buy");
+    });
   }
   buyLookRef.current = buyLook;
 
@@ -1370,7 +1432,8 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const definition = client.definition;
   const price = definition.price;
   const maxPrize = maximumPrize(definition);
-  const purse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent + ballSpent + snackSpent + lookSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent - ballSpent - snackSpent - lookSpent : 0n) : 0n;
+  const localPurse = snapshot ? (snapshot.rfBalance > skateSpent + maskSpent + gloveSpent + ballSpent + snackSpent + lookSpent ? snapshot.rfBalance - skateSpent - maskSpent - gloveSpent - ballSpent - snackSpent - lookSpent : 0n) : 0n;
+  const purse = chainRF ?? localPurse;
   const afford = snapshot ? purse >= price : false;
   const backed = snapshot ? snapshot.freeStake >= maxPrize && snapshot.freeStake + price >= maxPrize : false;
   const hasBought = burned > 0n || ownedLooks.size > 0 || (snapshot?.inventory.some((count) => count > 0n) ?? false);
@@ -1380,9 +1443,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
   function buyCoin() {
     void act(async () => {
+      await payRF(price);
       await client.buy(1n);
-      burnCoin(price);
-      note(`Burned ${rf(price / 2n)}`);
+      note(`Sent ${rf(price)}`);
     }, "purchase");
   }
 

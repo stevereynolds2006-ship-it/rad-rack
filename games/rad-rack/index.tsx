@@ -131,7 +131,7 @@ function parseSave(raw: string | null): RackSave | null {
   }
 }
 
-function loadRack(friendId: bigint): Promise<RackSave | null> {
+function loadRack(friendId: bigint): Promise<{ ready: boolean; save: RackSave | null }> {
   const id = friendId.toString();
   const local = () => {
     try {
@@ -140,18 +140,19 @@ function loadRack(friendId: bigint): Promise<RackSave | null> {
       return null;
     }
   };
-  if (window.parent === window) return Promise.resolve(local());
+  if (window.parent === window) return Promise.resolve({ ready: true, save: local() });
   return new Promise((resolve) => {
     const timer = window.setTimeout(() => {
       window.removeEventListener("message", onMessage);
-      resolve(local());
-    }, 500);
+      const cached = local();
+      resolve(cached ? { ready: true, save: cached } : { ready: false, save: null });
+    }, 2000);
     function onMessage(event: MessageEvent) {
       const data = event.data as { type?: string; friendId?: string; save?: string | null };
       if (!data || data.type !== "rad-rack:saved" || data.friendId !== id) return;
       window.clearTimeout(timer);
       window.removeEventListener("message", onMessage);
-      resolve(parseSave(typeof data.save === "string" ? data.save : null) ?? local());
+      resolve({ ready: true, save: parseSave(typeof data.save === "string" ? data.save : null) });
     }
     window.addEventListener("message", onMessage);
     window.parent.postMessage({ type: "rad-rack:load", friendId: id }, "*");
@@ -327,6 +328,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
   const epoch = useRef(0);
   const heard = useRef(false);
   const skipSave = useRef(true);
+  const closetRef = useRef<RackSave | null>(null);
   const buyLookRef = useRef<(index: number) => void>(() => {});
   const reduced = motionOverride ?? motionPref;
   const wornLooks = [...worn].sort((a, b) => a - b).map((id) => lookById(id));
@@ -442,34 +444,59 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     live.current.maskUntil = 0;
     skipSave.current = true;
     let cancel = false;
-    void loadRack(friendId).then((loaded) => {
-      if (cancel || version !== epoch.current) return;
-      const save = loaded ?? emptySave();
-      setWorn(new Set(save.worn));
-      setOwnedLooks(new Set(save.looks));
-      setLookSpent(BigInt(save.lookSpent));
-      setOwnedSkates(new Set(save.skates));
-      setEquipped(save.skate);
-      setSkateSpent(BigInt(save.skateSpent));
-      setOwnedMasks(new Set(save.masks));
-      setMask(save.mask);
-      setMaskSpent(BigInt(save.maskSpent));
-      setOwnedGloves(new Set(save.gloves));
-      setGlove(save.glove);
-      setGloveSpent(BigInt(save.gloveSpent));
-      setOwnedBalls(new Set(save.balls));
-      setBall(save.ball);
-      setBallSpent(BigInt(save.ballSpent));
-      setSnackSpent(BigInt(save.snackSpent));
-      setBurned(BigInt(save.burned));
-      setPhotos(save.photos);
-      setTape(save.tape);
-      live.current.prints = save.photos.map((photo) => ({ mask: photo.mask, worn: photo.worn.map((id) => lookById(id)) }));
-      live.current.glove = save.glove;
-      live.current.ball = save.ball;
-      live.current.mask = save.mask;
-      skipSave.current = false;
-    });
+    void (async () => {
+      for (let attempt = 0; attempt < 5 && !cancel && version === epoch.current; attempt += 1) {
+        const loaded = await loadRack(friendId);
+        if (cancel || version !== epoch.current) return;
+        if (!loaded.ready) continue;
+        const incoming = loaded.save ?? emptySave();
+        const held = closetRef.current;
+        const save = held
+          ? {
+              ...incoming,
+              worn: wholeNumbers([...incoming.worn, ...held.worn]),
+              looks: wholeNumbers([...incoming.looks, ...held.looks]),
+              skates: wholeNumbers([...incoming.skates, ...held.skates], [0]),
+              masks: wholeNumbers([...incoming.masks, ...held.masks], [0]),
+              gloves: wholeNumbers([...incoming.gloves, ...held.gloves], [0]),
+              balls: wholeNumbers([...incoming.balls, ...held.balls], [0]),
+              photos: held.photos.length > incoming.photos.length ? held.photos : incoming.photos,
+              skate: held.skate || incoming.skate,
+              mask: held.mask || incoming.mask,
+              glove: held.glove || incoming.glove,
+              ball: held.ball || incoming.ball,
+            }
+          : incoming;
+        closetRef.current = save;
+        if (held) storeRack(friendId, save);
+        setWorn(new Set(save.worn));
+        setOwnedLooks(new Set(save.looks));
+        setLookSpent(BigInt(save.lookSpent));
+        setOwnedSkates(new Set(save.skates));
+        setEquipped(save.skate);
+        setSkateSpent(BigInt(save.skateSpent));
+        setOwnedMasks(new Set(save.masks));
+        setMask(save.mask);
+        setMaskSpent(BigInt(save.maskSpent));
+        setOwnedGloves(new Set(save.gloves));
+        setGlove(save.glove);
+        setGloveSpent(BigInt(save.gloveSpent));
+        setOwnedBalls(new Set(save.balls));
+        setBall(save.ball);
+        setBallSpent(BigInt(save.ballSpent));
+        setSnackSpent(BigInt(save.snackSpent));
+        setBurned(BigInt(save.burned));
+        setPhotos(save.photos);
+        setTape(save.tape);
+        live.current.prints = save.photos.map((photo) => ({ mask: photo.mask, worn: photo.worn.map((id) => lookById(id)) }));
+        live.current.glove = save.glove;
+        live.current.ball = save.ball;
+        live.current.mask = save.mask;
+        live.current.quad = save.skate;
+        skipSave.current = false;
+        return;
+      }
+    })();
     void client
       .read()
       .then((value) => {
@@ -505,7 +532,7 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
 
   useEffect(() => {
     if (skipSave.current) return;
-    storeRack(friendId, {
+    const save: RackSave = {
       worn: [...worn],
       looks: [...ownedLooks],
       lookSpent: lookSpent.toString(),
@@ -525,7 +552,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
       burned: burned.toString(),
       photos,
       tape,
-    });
+    };
+    closetRef.current = save;
+    storeRack(friendId, save);
   }, [
     friendId,
     worn,
@@ -945,6 +974,33 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     setLastBurn(rf(amount));
   }
 
+  function keepCloset(patch: Partial<RackSave> = {}) {
+    const save: RackSave = {
+      worn: patch.worn ?? [...worn],
+      looks: patch.looks ?? [...ownedLooks],
+      lookSpent: patch.lookSpent ?? lookSpent.toString(),
+      skates: patch.skates ?? [...ownedSkates],
+      skate: patch.skate ?? equipped,
+      skateSpent: patch.skateSpent ?? skateSpent.toString(),
+      masks: patch.masks ?? [...ownedMasks],
+      mask: patch.mask ?? mask,
+      maskSpent: patch.maskSpent ?? maskSpent.toString(),
+      gloves: patch.gloves ?? [...ownedGloves],
+      glove: patch.glove ?? glove,
+      gloveSpent: patch.gloveSpent ?? gloveSpent.toString(),
+      balls: patch.balls ?? [...ownedBalls],
+      ball: patch.ball ?? ball,
+      ballSpent: patch.ballSpent ?? ballSpent.toString(),
+      snackSpent: patch.snackSpent ?? snackSpent.toString(),
+      burned: patch.burned ?? burned.toString(),
+      photos: patch.photos ?? photos,
+      tape: patch.tape ?? tape,
+    };
+    skipSave.current = false;
+    closetRef.current = save;
+    storeRack(friendId, save);
+  }
+
   function burnToken(count: bigint) {
     if (count < 1n) return;
     const halves = count;
@@ -969,7 +1025,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     void act(async () => {
       await payRF(skate.price);
-      setOwnedSkates((owned) => new Set(owned).add(id));
+      const skates = [...new Set([...ownedSkates, id])];
+      keepCloset({ skates, skate: id });
+      setOwnedSkates(new Set(skates));
       setEquipped(id);
       live.current.quad = id;
       if (live.current.room === "rink") live.current.fitUntil = performance.now() + 1800;
@@ -995,7 +1053,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     void act(async () => {
       await payRF(item.price);
-      setOwnedMasks((owned) => new Set(owned).add(id));
+      const masks = [...new Set([...ownedMasks, id])];
+      keepCloset({ masks, mask: id });
+      setOwnedMasks(new Set(masks));
       setMask(id);
       live.current.mask = id;
       note(`${item.name} bought. Sent ${rf(item.price)}`);
@@ -1020,7 +1080,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     void act(async () => {
       await payRF(item.price);
-      setOwnedGloves((owned) => new Set(owned).add(id));
+      const gloves = [...new Set([...ownedGloves, id])];
+      keepCloset({ gloves, glove: id });
+      setOwnedGloves(new Set(gloves));
       setGlove(id);
       live.current.glove = id;
       note(`${item.name} bought. Sent ${rf(item.price)}`);
@@ -1045,7 +1107,9 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     void act(async () => {
       await payRF(item.price);
-      setOwnedBalls((owned) => new Set(owned).add(id));
+      const balls = [...new Set([...ownedBalls, id])];
+      keepCloset({ balls, ball: id });
+      setOwnedBalls(new Set(balls));
       setBall(id);
       live.current.ball = id;
       note(`${item.name} bought. Sent ${rf(item.price)}`);
@@ -1318,8 +1382,11 @@ export default function RadRack({ friendId, client, paused }: GameComponentProps
     }
     void act(async () => {
       await payRF(look.price);
-      setOwnedLooks((owned) => new Set(owned).add(index));
-      setWorn((current) => new Set(current).add(index));
+      const looks = [...new Set([...ownedLooks, index])];
+      const wearing = [...new Set([...worn, index])];
+      keepCloset({ looks, worn: wearing });
+      setOwnedLooks(new Set(looks));
+      setWorn(new Set(wearing));
       live.current.worn = [...worn].concat(index).sort((a, b) => a - b).map((id) => lookById(id));
       live.current.outfitUntil = performance.now() + 1800;
       note(`${look.name} bought. Sent ${rf(look.price)}`);

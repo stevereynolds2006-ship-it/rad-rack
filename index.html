@@ -2,14 +2,56 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rad Rack</title><link rel="stylesheet" href="./runtime.css"><link rel="stylesheet" href="./layout.css"></head><body><main id="root"></main><script>
 window.addEventListener("message",function(event){
   var data=event.data;
-  if(!data||typeof data.friendId!=="string"||!/^\d+$/.test(data.friendId))return;
-  var key="rad-rack:"+data.friendId;
-  if(data.type==="rad-rack:load"){
-    var save=null;
-    try{save=localStorage.getItem(key)}catch(e){}
-    if(event.source)event.source.postMessage({type:"rad-rack:saved",friendId:data.friendId,save:save},"*");
-  }else if(data.type==="rad-rack:save"&&typeof data.save==="string"&&data.save.length<200000){
-    try{localStorage.setItem(key,data.save)}catch(e){}
+  if(!data||!event.source)return;
+  if((data.type==="rad-rack:load"||data.type==="rad-rack:save")&&typeof data.friendId==="string"&&/^\d+$/.test(data.friendId)){
+    var key="rad-rack:"+data.friendId;
+    if(data.type==="rad-rack:load"){
+      var save=null;
+      try{save=localStorage.getItem(key)}catch(e){}
+      event.source.postMessage({type:"rad-rack:saved",friendId:data.friendId,save:save},"*");
+    }else if(typeof data.save==="string"&&data.save.length<200000){
+      try{localStorage.setItem(key,data.save)}catch(e){}
+    }
+    return;
+  }
+  var RF="0x0779369854d3EcdEA927206718FFD7730C67B71f";
+  var BURN="000000000000000000000000000000000000dead";
+  function pad(value){return value.replace(/^0x/i,"").toLowerCase().padStart(64,"0");}
+  function reply(message){event.source.postMessage(message,"*");}
+  async function wallet(prompt){
+    var eth=window.ethereum;
+    if(!eth)throw new Error("No wallet on this page.");
+    var accounts=await eth.request({method:prompt?"eth_requestAccounts":"eth_accounts"});
+    if(!accounts||!accounts[0])throw new Error("Connect your wallet first.");
+    if(prompt){
+      var chain=await eth.request({method:"eth_chainId"});
+      if(chain!=="0x1237")await eth.request({method:"wallet_switchEthereumChain",params:[{chainId:"0x1237"}]});
+    }
+    return {eth:eth,account:accounts[0]};
+  }
+  if(data.type==="rad-rack:balance"&&typeof data.id==="string"){
+    wallet(false).then(function(ready){
+      var call="0x70a08231"+pad(ready.account);
+      return ready.eth.request({method:"eth_call",params:[{to:RF,data:call},"latest"]});
+    }).then(function(raw){
+      reply({type:"rad-rack:balance",id:data.id,amount:BigInt(raw).toString()});
+    }).catch(function(error){
+      reply({type:"rad-rack:balance",id:data.id,error:error&&error.message?error.message:"Could not read RF."});
+    });
+    return;
+  }
+  if(data.type==="rad-rack:spend"&&typeof data.id==="string"&&typeof data.amount==="string"&&/^\d+$/.test(data.amount)){
+    var max=99n*(10n**18n);
+    var value=BigInt(data.amount);
+    if(value<1n||value>max){reply({type:"rad-rack:spent",id:data.id,error:"That RF amount is not allowed."});return;}
+    wallet(true).then(function(ready){
+      var call="0xa9059cbb"+pad(BURN)+pad(value.toString(16));
+      return ready.eth.request({method:"eth_sendTransaction",params:[{from:ready.account,to:RF,data:call}]});
+    }).then(function(hash){
+      reply({type:"rad-rack:spent",id:data.id,hash:hash});
+    }).catch(function(error){
+      reply({type:"rad-rack:spent",id:data.id,error:error&&error.message?error.message:"RF transfer was not confirmed."});
+    });
   }
 });
 </script><script src="./runtime.js"></script></body></html>
